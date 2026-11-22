@@ -36,6 +36,8 @@ unreleased
     remaining, error count, model, firmware and serial (sub-page 0x35.)
   * drives: decode health (good/healed/warning/failed) and drive type
     (HDD/SSD, SATA/SAS/mSATA.)
+  * drives: decode the rotational speed code ('rpm' in GetSlotInfo2(), RPM
+    column in drobom info drives.)
   * GetLUNsInfoEx() and drobom info volumes: extended LUN info (names,
     sizes, formats) via a read-only system operation, paged.
   * tests: more regression fixtures (LUN info, options, DroboPro inquiry.)
