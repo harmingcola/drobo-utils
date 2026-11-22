@@ -1556,13 +1556,13 @@ class Drobo:
         if DEBUG & DBG_Simulation:
             return [{'slot': i, 'status': 1, 'errors': 0, 'disk_state': 2,
                      'disk_type': 1, 'temperature': 35 + i,
-                     'life_remaining': 100 - 7 * i, 'rotational_speed': 72,
+                     'life_remaining': 100 - 7 * i, 'rotational_speed': 36,
                      'manufacturer': 'WDC WD30EFRX-68EUZN0',
                      'firmware': '82.00A82', 'serial': 'WD-SIMULATED%d' % i,
                      'total_capacity': 3000592982016,
                      'managed_capacity': 2999000000000, 'health': 'Good',
                      'media': 'HDD', 'interface': 'SATA',
-                     'rpm': _driverpm(72)} for i in range(4)]
+                     'rpm': _driverpm(36)} for i in range(4)]
 
         maxlen = 8 + 128 * max(self.slot_count, 8)  # room for padded records
         try:
