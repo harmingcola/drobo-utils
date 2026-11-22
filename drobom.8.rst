@@ -72,11 +72,27 @@ Command is one of:
 * *shutdown*
   shutdown drobo (DRI calls this 'standby')
 * *status*
-  report how is the Drobo doing
+  report how is the Drobo doing.  While data protection (relay out) is running,
+  the second and later runs also estimate the time left and when it will be
+  done ("about 2 hours left", "done around 15:26").  The unit only reports the
+  work left, so the estimate comes from how fast that falls since the first run.
 * *device*
   raw block device of a drobo (i.e. /dev/sdz) . If not given, assumes all attached drobos.
 * *view*
   Start up the graphical user interface.
+
+FILES
+=====
+
+$XDG_STATE_HOME/drobo-utils/relayout-<name>.json (default ~/.local/state/drobo-utils/)
+  starting point of a running relay out, used for the status estimate.
+  Removed when the relay out completes.  Safe to delete.
+
+ENVIRONMENT
+===========
+
+DROBO_UTILS_STATE_DIR
+  directory to keep the relay out state in, instead of the default above.
 
 This manual page was written by Chris AtLee <chris@atlee.ca> for the Debian
 project (but may be used by others).

@@ -181,7 +181,10 @@ USB 3 era units:
    and treats status as 64 bits wide.  Not yet decoded here.
 
  * Relay out (data protection) time left is not reported by the unit.  It is 
-   estimated from how fast the relay out count falls (GetSubPageStatus.)
+   estimated from how fast the relay out count falls since the relay out was 
+   first seen (GetSubPageStatus, GetRelayoutEstimate.)  That starting point is 
+   saved under $DROBO_UTILS_STATE_DIR / $XDG_STATE_HOME/drobo-utils so separate 
+   drobom runs share it; when running drobom in a container, mount that directory.
 
  * USB transfer size: the vendor's software caps USB transfers at 512 KiB 
    for several older Drobo USB ids.  Linux uses 1 MiB on SuperSpeed by default; 

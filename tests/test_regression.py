@@ -22,6 +22,8 @@ import os
 import struct
 import subprocess
 import sys
+import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -30,6 +32,20 @@ sys.path.insert(0, TOP)
 
 import Drobo
 import DroboIOctl
+
+_STATE = None
+
+
+def setUpModule():
+    """ no test may read or write saved state in the real home directory. """
+    global _STATE
+    _STATE = tempfile.TemporaryDirectory()
+    os.environ['DROBO_UTILS_STATE_DIR'] = _STATE.name
+
+
+def tearDownModule():
+    os.environ.pop('DROBO_UTILS_STATE_DIR', None)
+    _STATE.cleanup()
 
 # --- fixtures: what a first generation Drobo returns for each sub-page -------
 
@@ -187,9 +203,22 @@ class TestRelayoutStatus(unittest.TestCase):
     """ GetSubPageStatus while data protection (relay out) is running. """
 
     def setUp(self):
+        # keep any saved relay out state out of the real home directory, and
+        # make clock times predictable.
+        self.state = tempfile.TemporaryDirectory()
+        self.addCleanup(self.state.cleanup)
+        env = mock.patch.dict(os.environ, {
+            'DROBO_UTILS_STATE_DIR': self.state.name,
+            'TZ': 'UTC'
+        })
+        self.addCleanup(time.tzset)  # cleanups run last-in first-out:
+        env.start()  # restore the environment, then re-read TZ.
+        self.addCleanup(env.stop)
+        time.tzset()
+
         self.dev = RelayoutDevice()
         self.d = make_drobo(self.dev)
-        self.now = 1000000.0
+        self.now = 1000000.0  # 1970-01-12 13:46:40 UTC, a Monday
         patcher = mock.patch.object(Drobo.time, 'time', lambda: self.now)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -237,6 +266,70 @@ class TestRelayoutStatus(unittest.TestCase):
         self.status(0, minutes_later=10)  # finished
         s, count = self.status(800, minutes_later=60)  # a new relay out
         self.assertIn('no estimate yet ', s)
+
+    # --- estimated completion time -------------------------------------
+
+    def test_completion_time_today(self):
+        """ started 13:46:40, 10% done after 10 min: ~90 min left,
+            so done around 15:26 the same day. """
+        self.status(1000)
+        s, count = self.status(900, minutes_later=10)
+        self.assertIn('done around 15:26 ', s)
+
+    def test_completion_time_another_day(self):
+        """ 1% done in 10 min: ~990 min left, finishing the next day. """
+        self.status(10000)
+        s, count = self.status(9900, minutes_later=10)
+        self.assertIn('done around Tue 06:26 ', s)
+
+    def test_estimate_survives_separate_runs(self):
+        """ drobom status is one reading per run: a second, separate Drobo
+            instance (a later run) must still produce an estimate. """
+        self.status(1000)
+        later = make_drobo(self.dev)
+        self.now += 10 * 60
+        self.dev.count = 900
+        s, count = later.GetSubPageStatus()
+        self.assertIn('about 2 hours left ', s)
+
+    def test_state_removed_when_complete(self):
+        self.status(1000)
+        self.assertTrue(os.listdir(self.state.name))
+        self.status(0, minutes_later=10)
+        self.assertEqual(os.listdir(self.state.name), [])
+
+    def test_rising_count_restarts_estimate(self):
+        """ the count going up means new work (e.g. another drive replaced):
+            start over rather than report nonsense. """
+        self.status(1000)
+        s, count = self.status(1500, minutes_later=10)
+        self.assertIn('no estimate yet ', s)
+
+    def test_relayout_estimate_api(self):
+        self.status(1000)
+        self.now += 10 * 60
+        self.dev.count = 900
+        e = self.d.GetRelayoutEstimate()
+        self.assertEqual(e['blocks_left'], 900)
+        self.assertAlmostEqual(e['percent_done'], 10.0)
+        self.assertAlmostEqual(e['minutes_left'], 90.0)
+        self.assertAlmostEqual(e['eta'], self.now + 90 * 60)
+
+    def test_relayout_estimate_api_idle(self):
+        self.dev.count = 0
+        self.assertIsNone(self.d.GetRelayoutEstimate())
+
+    def test_unwritable_state_dir_still_works(self):
+        with mock.patch.dict(os.environ,
+                             {'DROBO_UTILS_STATE_DIR': '/proc/no/such/dir'}):
+            d = make_drobo(self.dev)
+            self.dev.count = 1000
+            s, count = d.GetSubPageStatus()
+            self.assertIn('no estimate yet ', s)
+            self.now += 600
+            self.dev.count = 900
+            s, count = d.GetSubPageStatus()  # same instance: in memory
+            self.assertIn('about 2 hours left ', s)
 
     def test_idle_unit_reports_nothing_extra(self):
         s, count = self.status(0)

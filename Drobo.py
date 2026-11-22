@@ -32,6 +32,7 @@ import zipfile, zlib
 
 #only for simulation mode...
 import random
+import json
 
 # maximum transaction ID before wrapping...
 MAX_TRANSACTION = 250
@@ -114,6 +115,17 @@ def _timeleft(minutes):
     else:
         n, unit = minutes, 'minute'
     return 'about %d %s%s left ' % (n, unit, '' if n == 1 else 's')
+
+
+def _completion(eta):
+    """ format the estimated completion time (seconds since the epoch) in local
+        time: 'done around 15:26 ', or with the weekday if not today.
+    """
+    when = time.localtime(eta)
+    today = time.localtime(time.time())
+    if time.strftime('%Y%m%d', when) == time.strftime('%Y%m%d', today):
+        return time.strftime('done around %H:%M ', when)
+    return time.strftime('done around %a %H:%M ', when)
 
 
 def _unitstatus(n):
@@ -301,6 +313,9 @@ class Drobo:
         self.transactionID = random.randint(1, MAX_TRANSACTION)
 
         self.relaystart = 0
+        self.relayinitialcount = 0
+        self.relayout_estimate = None
+        self.name = ''
 
         # 'legacy': page 0x3A comes back raw (first generation Drobos...)
         # 'dbd': page follows a mode parameter header (Drobo S Gen 2, USB 3)
@@ -340,6 +355,7 @@ class Drobo:
                 raise DroboException  # Assert: All Drobo have 4 slots.
 
             set = self.GetSubPageSettings()
+            self.name = set[2]
             if DEBUG & DBG_Detection:
                 print("settings: ", set)
 
@@ -1362,30 +1378,119 @@ class Drobo:
         s = _unitstatus(ss[0])
 
         if ss[1] > 0:  # relay out in progress
-            if self.relaystart == 0:
-                self.relaystart = time.time()
-                self.relayinitialcount = ss[1]
+            est = self.__relayout_track(ss[1])
+            self.relayout_estimate = est
+            if est is None:
                 s.append('no estimate yet ')
+            elif est['blocks_done'] == 0:
+                s.append('gathering stats, no estimate yet ')
+                self.relayout_estimate = None
             else:
-                now = time.time()
-                runningtime = (now - self.relaystart) / 60.0
-                amtdone = self.relayinitialcount - ss[1]
-                amtleft = ss[1]
-                pctleft = 100.0 * amtleft / self.relayinitialcount
-                pctdone = 100 - pctleft
-
-                if amtdone == 0:
-                    s.append('gathering stats, no estimate yet ')
-                else:
-                    rate = pctdone / runningtime  # percent per minute
-                    timeleft = pctleft / rate  # timeleft in minutes...
-                    s.append('%d blocks left ' % ss[1])
-                    s.append(_timeleft(timeleft))
+                s.append('%d blocks left ' % ss[1])
+                s.append(_timeleft(est['minutes_left']))
+                s.append(_completion(est['eta']))
         else:
-            if self.relaystart > 0:
-                self.relaystart = 0
+            self.relayout_estimate = None
+            self.__relayout_clear()
 
         return (s, ss[1])
+
+    def GetRelayoutEstimate(self):
+        """ query the unit, and if data protection (relay out) is running and
+        enough progress has been seen, return a dictionary:
+
+          blocks_left, blocks_done, percent_done, minutes_left, eta, started
+
+        eta and started are seconds since the epoch.  Returns None when no
+        relay out is running, or there is no estimate yet.
+
+        The unit only reports how much work is left (the relay out count), so
+        the estimate comes from how fast that count falls.  The starting
+        point is saved (see __relayout_state_file) so that one shot commands
+        like 'drobom status' produce an estimate from the second run on.
+        """
+        if DEBUG & DBG_Simulation:
+            return None
+        self.GetSubPageStatus()
+        return self.relayout_estimate
+
+    def __relayout_state_file(self):
+        """ where the relay out starting point is kept between runs:
+        $DROBO_UTILS_STATE_DIR, else $XDG_STATE_HOME/drobo-utils, else
+        ~/.local/state/drobo-utils.  One file per unit, named after it.
+        """
+        d = os.environ.get('DROBO_UTILS_STATE_DIR')
+        if not d:
+            base = os.environ.get('XDG_STATE_HOME') or \
+                   os.path.join(os.path.expanduser('~'), '.local', 'state')
+            d = os.path.join(base, 'drobo-utils')
+        name = re.sub(r'[^A-Za-z0-9_.-]', '_', self.name or 'drobo')
+        return os.path.join(d, 'relayout-%s.json' % name)
+
+    def __relayout_load(self):
+        """ starting point from memory, or else from the state file. """
+        if self.relaystart > 0:
+            return (self.relaystart, self.relayinitialcount)
+        try:
+            with open(self.__relayout_state_file()) as f:
+                st = json.load(f)
+            return (float(st['start']), int(st['count']))
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+
+    def __relayout_save(self, start, count):
+        self.relaystart = start
+        self.relayinitialcount = count
+        f = self.__relayout_state_file()
+        try:
+            os.makedirs(os.path.dirname(f), exist_ok=True)
+            tmp = f + '.tmp'
+            with open(tmp, 'w') as fd:
+                json.dump({'start': start, 'count': count}, fd)
+            os.replace(tmp, f)
+        except OSError:
+            if DEBUG & DBG_General:
+                print('cannot save relay out state to %s' % f)
+
+    def __relayout_clear(self):
+        self.relaystart = 0
+        self.relayinitialcount = 0
+        try:
+            os.remove(self.__relayout_state_file())
+        except OSError:
+            pass
+
+    def __relayout_track(self, count):
+        """ update relay out tracking with the current count (blocks left.)
+        returns None on the first reading (or after a restart), else a dict
+        as described in GetRelayoutEstimate.
+        """
+        now = time.time()
+        st = self.__relayout_load()
+        if (st is None) or (count > st[1]):
+            # first reading, or more work than when we started: start over.
+            self.__relayout_save(now, count)
+            return None
+
+        start, initial = st
+        self.relaystart, self.relayinitialcount = start, initial
+        done = initial - count
+        est = {
+            'blocks_left': count,
+            'blocks_done': done,
+            'percent_done': 100.0 * done / initial,
+            'minutes_left': None,
+            'eta': None,
+            'started': start
+        }
+        runningtime = (now - start) / 60.0
+        if done > 0 and runningtime > 0:
+            rate = est['percent_done'] / runningtime  # percent per minute
+            est['minutes_left'] = (100.0 - est['percent_done']) / rate
+            est['eta'] = now + est['minutes_left'] * 60
+        else:
+            est['blocks_done'] = 0
+        return est
 
     def GetOptions(self):
         """
