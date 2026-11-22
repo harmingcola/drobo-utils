@@ -171,3 +171,15 @@ class TestInfoDrivesRpm(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestSimulatedRPM(unittest.TestCase):
+    """ simulation mode should show a realistic spindle speed. """
+
+    def test_simulated_drives_spin_at_7200(self):
+        r = subprocess.run([sys.executable, os.path.join(TOP, 'drobom'), '-v',
+                            '128', 'info', 'drives'], cwd=TOP,
+                           capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(' 7200 ', r.stdout)
+        self.assertNotIn('14400', r.stdout)
