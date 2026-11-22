@@ -148,6 +148,86 @@ Since few developers still have every model to test with, the tests are the
 main protection against breaking older units while adding newer ones.
 
 
+How Drobos identify themselves
+------------------------------
+
+Discovery (DroboIOctl.drobolunlist) looks at the vendor and product ids in
+each disk's standard INQUIRY data.  On Linux the same strings are in
+/sys/block/sdX/device/vendor and .../model.  DroboIOctl.DROBO_IDENTITIES is
+the list of (vendor prefix, product prefix, model name) rules, checked in
+order, ignoring case; drobom -s adds one more vendor prefix.  Anything that
+matches still has to pass the Drobo() constructor checks (config page has
+three fields, at least 4 slots, sane firmware page.)  Drobo.model holds the
+model name, and drobom -v 16 prints it as each unit is found.
+
+What units report, by family.  Source: the IOKit matching dictionaries of the
+vendor's Mac SCSI driver (TrustedDataSCSIDriver.kext, Dashboard 3.5.0), all
+for SCSI peripheral type 0 (disk).  The Mac Dashboard does no string matching
+of its own: it enumerates the devices that driver attached to.
+
+ * First and second generation Drobo: vendor 'TRUSTED' (the vendor's driver
+   is still named after Trusted Data, apparently the company's earlier name),
+   product 'Mass Storage' or 'USB Mass Storage'.
+ * Third generation Drobo: vendor 'Drobo' or 'DROBO', product 'Drobo3',
+   'Gen3' or '3rd Gen DRDR3-A'.
+ * DroboPro and DroboElite: vendor 'DROBO'/'Drobo', product 'DroboPro' or
+   'DroboElite'.
+ * Drobo S Gen 2 on USB 3: vendor 'USB 3.0', product 'Drobo S - Gen 2' (the
+   only Drobo whose vendor is not the company name.)
+ * Drobo 5D, 5D3, 5C, 8D and Mini: vendor 'Drobo' (5D and Mini also seen as
+   'DROBO'), product '5D', '5D3', '5C', '8D' or 'Mini'.  When connected by
+   Thunderbolt the product gets a ' - TB' suffix ('5D - TB', 'Mini - TB', ...)
+ * iSCSI units B800i, B810i and B1200i: vendor 'Drobo', product the model.
+ * Catch-all: the Mac driver also attaches to vendor 'Drobo' with an empty
+   product id, and to vendor 'Drobo' or 'DROBO' with product 'Drobo'.
+
+The Windows Dashboard matches device instance paths instead.  Those are lower
+case, with '_' for spaces, e.g. usbstor#disk&ven_usb_3.0&prod_drobo_s_-_gen_2.
+Its strings (usbstor#, sbp2#/sbp#/dsbp# for FireWire, drobo_s with usb_3.0,
+3rd_gen_dr, drdr3) are the same identities seen through that naming.
+
+Thunderbolt: the Mac Dashboard also ships a driver for the Drobo Thunderbolt
+controller, which shows up as a PCI device (vendor id 0x4452, device ids
+0x5570 and 0x3844) and needs its own SCSI host driver.  Linux has no such
+driver, so on Linux only the USB ports of 5D/5D3/8D/Mini class units are
+expected to work (untested.)
+
+eSATA: the Mac Dashboard treats a unit as eSATA only when its product id from
+the serial number (below) is 10, one of the two Drobo S ids, and it is not on
+FireWire.  It then tunnels requests through ordinary disk reads and writes
+(ATASCSISession), not SCSI pass-through.  drobo-utils has no such tunnel, so
+the Drobo S family on eSATA is "data only".
+
+Unit serial number: the Mac Dashboard reads the INQUIRY unit serial number
+(VPD page 0x80) and derives a product id from it.  A 15 character serial
+starting with 'D' (newer style, e.g. DRB...) carries it as three hex digits
+at characters 8 to 10; an older serial starting with 'T' (12 characters, or
+the same with '0' in place of the 'T') carries one hex digit at character 8.
+Decoded from the Dashboard's product id to model name lookup:
+
+  ======  ==========================  ======  ==========================
+  id      model                       id      model
+  ======  ==========================  ======  ==========================
+  0       Drobo (gen 1, probably)     26      Drobo 5N
+  2       Drobo (gen 2, probably)     28      B810i
+  4       DroboPro                    29      Drobo (gen 3, probably)
+  5, 10   Drobo S (one is Gen 2)      32      B810n
+  7       Drobo FS                    33      Drobo 5C
+  8       DroboElite                  34      Drobo 8D
+  9       DroboPro FS                 35      Drobo 5N2
+  11      B800i                       36      Drobo 8N
+  12      B800fs                      38      Drobo 5D3
+  16      B1200i                      39      B820n
+  23      Drobo 5D                    40      B820i
+  25      Drobo Mini                  45      Drobo 8i
+  ======  ==========================  ======  ==========================
+
+drobo-utils does not use the serial yet: reading VPD pages over USB is not
+always safe (Linux usb-storage normally skips them), so it would need testing
+on real units first.  If the kernel did read it, it is in
+/sys/block/sdX/device/vpd_pg80.
+
+
 Protocol Notes: Drobo S Gen 2 (USB 3)
 -------------------------------------
 
