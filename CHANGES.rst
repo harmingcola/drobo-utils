@@ -38,6 +38,8 @@ unreleased
     (HDD/SSD, SATA/SAS/mSATA.)
   * GetLUNsInfoEx() and drobom info volumes: extended LUN info (names,
     sizes, formats) via a read-only system operation, paged.
+  * tests: more regression fixtures (LUN info, options, DroboPro inquiry),
+    and GitHub Actions runs the tests on Python 3.8 to 3.13.
   * name status bits: incompatible disk pack, power supply missing, fan
     partially failed, fan failed, fan missing.
   * add hardware-free regression tests (make test.)

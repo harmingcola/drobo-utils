@@ -147,6 +147,9 @@ Run them before and after any change to Drobo.py, DroboIOctl.py or drobom.
 Since few developers still have every model to test with, the tests are the 
 main protection against breaking older units while adding newer ones.
 
+GitHub Actions (.github/workflows/tests.yml) runs the same tests on every push
+and pull request, on Python 3.8 to 3.13.
+
 
 Protocol Notes: Drobo S Gen 2 (USB 3)
 -------------------------------------
