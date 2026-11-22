@@ -43,6 +43,10 @@ unreleased
     column in drobom info drives.)
   * GetLUNsInfoEx() and drobom info volumes: extended LUN info (names,
     sizes, formats) via a read-only system operation, paged.
+  * GetLUNsInfoEx2(): extended LUN info version 2 (read-only system
+    operation 0x83, only on firmware advertising it), with per volume
+    initiator names and addresses; drobom info volumes uses the best
+    available source (GetLUNsInfoBest()).
   * tests: more regression fixtures (LUN info, options, DroboPro inquiry.)
   * name status bits: incompatible disk pack, power supply missing, fan
     partially failed, fan failed, fan missing.
