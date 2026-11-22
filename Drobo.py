@@ -241,6 +241,25 @@ def _unitstatus(n):
     return f
 
 
+# status severity, the vendor's own rule (getSeverityForStatus, as published
+# by the ReDrobo project): any bit of the red mask, tested 32 bits wide, is
+# red; otherwise any bit of the yellow mask, tested 64 bits wide, is yellow;
+# otherwise green.  With a 32 bit status only the low word of the yellow mask
+# applies.  Bits 15 and 17, set on a healthy unit, are in neither mask.
+_SEVERITY_RED = 0x14c4187a
+_SEVERITY_YELLOW = 0x36002300244
+
+
+def _statusseverity(status):
+    """ 'red', 'yellow' or 'green' for a numeric unit status (32 or 64 bits.)
+    """
+    if status & 0xffffffff & _SEVERITY_RED:
+        return 'red'
+    if status & _SEVERITY_YELLOW:
+        return 'yellow'
+    return 'green'
+
+
 def _partformat(n):
     """ return Drobo's idea of what the partition type is
 
@@ -1506,6 +1525,10 @@ class Drobo:
           diskpack_status - disk pack status, or None on older firmware
           double_degraded - double degraded count, or None on older firmware
           extra           - a further u32 of unknown meaning, or None
+          severity        - 'red', 'yellow' or 'green', by the vendor's
+                            rule (_statusseverity) applied to the status
+                            bits and the bits the disk pack status implies,
+                            so it agrees with the flags.  extra is not used.
 
         Newer firmware returns 16, 20 or 24 bytes of status instead of 12.
         Like the vendor's software, disk pack status 2..8 is folded into the
@@ -1517,7 +1540,8 @@ class Drobo:
         if DEBUG & DBG_Simulation:
             return {'status': 0x0240, 'flags': _unitstatus(0x0240),
                     'relayout_count': 1250000, 'diskpack_status': 1,
-                    'double_degraded': 0, 'extra': None}
+                    'double_degraded': 0, 'extra': None,
+                    'severity': _statusseverity(0x0240)}
 
         body = self.__getsubpage_raw(0x09, 20)
         n = len(body) // 4
@@ -1530,7 +1554,8 @@ class Drobo:
                    6: 0x0020, 7: 0x0020, 8: 0x40000}.get(diskpack, 0)
         return {'status': status, 'flags': _unitstatus(status | implied),
                 'relayout_count': relayout, 'diskpack_status': diskpack,
-                'double_degraded': dd, 'extra': extra}
+                'double_degraded': dd, 'extra': extra,
+                'severity': _statusseverity(status | implied)}
 
     def GetSlotInfo2(self):
         """ per-drive details, from sub-page 0x35 (newer firmware.)  returns a

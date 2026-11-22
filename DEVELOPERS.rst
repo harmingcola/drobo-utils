@@ -334,6 +334,26 @@ USB 3 era units:
    echo 1024 > /sys/block/sdX/device/max_sectors
 
 
+Protocol Notes: facts from ReDrobo
+----------------------------------
+
+The ReDrobo project (https://github.com/fetzu/ReDrobo, MIT licence) publishes
+a protocol write-up, docs/PROTOCOL.md, checked against a live Drobo 5D
+(firmware 4.2.3) and the vendor's Dashboard.  drobo-utils uses the facts
+below from it; the code is our own.
+
+ * Status severity (GetStatusEx()['severity'], _statusseverity, shown by
+   drobom info health).  The vendor's own rule, from its
+   getSeverityForStatus: red if status & 0x14c4187a (tested 32 bits wide),
+   else yellow if status & 0x36002300244 (tested 64 bits wide), else green.
+   Our status is a u32 from sub-page 0x09, so only the low word of the
+   yellow mask (0x02300244) can apply.  A healthy 5D reports 0x00028000:
+   bits 15 and 17 are set when healthy, are in neither mask and are not
+   alerts (their meaning is unknown), so it is green.  The severity is taken
+   over the status bits plus the bits the disk pack status implies, so it
+   agrees with the flags; the 24 byte record's extra word is not used.
+
+
 Making a Release
 ----------------
 

@@ -232,6 +232,7 @@ def printhealth(d):
         r = 'protected'
     print('Redundancy: %s' % r)
     print('Status: %s' % (', '.join(e['flags']) or 'OK'))
+    print('Severity: %s' % e['severity'])
     if e['relayout_count']:
         est = d.GetRelayoutEstimate()
         if est is None:

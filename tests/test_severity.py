@@ -95,5 +95,119 @@ class TestPrintHealthRegression(unittest.TestCase):
                       r.stdout)
 
 
+RED_MASK = 0x14c4187a
+YELLOW_MASK = 0x36002300244
+
+
+class TestSeverityHelper(unittest.TestCase):
+    """ Drobo._statusseverity: the vendor's rule, red before yellow. """
+
+    def test_green(self):
+        self.assertEqual(Drobo._statusseverity(0), 'green')
+
+    def test_healthy_5d_is_green(self):
+        """ bits 15 and 17 are set when healthy and must not count. """
+        self.assertEqual(Drobo._statusseverity(HEALTHY_5D), 'green')
+        self.assertEqual(Drobo._statusseverity(1 << 15), 'green')
+        self.assertEqual(Drobo._statusseverity(1 << 17), 'green')
+
+    def test_every_red_bit(self):
+        for bit in range(32):
+            if RED_MASK & (1 << bit):
+                self.assertEqual(Drobo._statusseverity(1 << bit), 'red', bit)
+                self.assertEqual(
+                    Drobo._statusseverity(HEALTHY_5D | (1 << bit)), 'red', bit)
+
+    def test_every_yellow_bit(self):
+        for bit in range(64):
+            m = 1 << bit
+            if YELLOW_MASK & m and not RED_MASK & m:
+                self.assertEqual(Drobo._statusseverity(m), 'yellow', bit)
+
+    def test_other_bits_are_green(self):
+        for bit in range(64):
+            m = 1 << bit
+            if not (RED_MASK | YELLOW_MASK) & m:
+                self.assertEqual(Drobo._statusseverity(m), 'green', bit)
+
+    def test_red_wins_over_yellow(self):
+        self.assertEqual(Drobo._statusseverity(0x0004 | 0x0002), 'red')
+        # bit 6 (no redundancy) is in both masks
+        self.assertEqual(Drobo._statusseverity(0x0040), 'red')
+
+    def test_red_mask_is_32_bits_wide(self):
+        """ the red test is 32 bits wide: a high bit alone is never red. """
+        self.assertEqual(Drobo._statusseverity(1 << 33), 'green')
+        self.assertEqual(Drobo._statusseverity((1 << 32) | 0x0004), 'yellow')
+
+    def test_yellow_high_bits_need_64_bit_status(self):
+        self.assertEqual(Drobo._statusseverity(1 << 41), 'yellow')
+        self.assertEqual(Drobo._statusseverity(1 << 37), 'yellow')
+        self.assertEqual(Drobo._statusseverity((1 << 41) & 0xffffffff),
+                         'green')
+
+    def test_named_examples(self):
+        for status, want in ((0x0004, 'yellow'),   # yellow threshold
+                             (0x0200, 'yellow'),   # relay out in progress
+                             (0x0002, 'red'),      # red threshold
+                             (0x0010, 'red'),      # bad disk
+                             (0x0400, 'green')):   # format in progress
+            self.assertEqual(Drobo._statusseverity(status), want, hex(status))
+
+
+class TestStatusExSeverity(unittest.TestCase):
+    """ GetStatusEx()['severity']. """
+
+    def severity(self, *fields):
+        return make_drobo(StatusDevice(*fields)).GetStatusEx()['severity']
+
+    def test_healthy_5d(self):
+        self.assertEqual(self.severity(HEALTHY_5D, 0, 1, 0), 'green')
+
+    def test_legacy_12_byte_page(self):
+        self.assertEqual(self.severity(0, 0), 'green')
+        self.assertEqual(self.severity(0x0200, 100), 'yellow')
+        self.assertEqual(self.severity(0x0040, 0), 'red')
+
+    def test_extra_word_is_not_the_high_word(self):
+        """ the meaning of the 24 byte record's extra u32 is unknown, so it
+            must not be treated as the high half of the status. """
+        self.assertEqual(self.severity(0, 0, 1, 0, 1 << (41 - 32)), 'green')
+
+    def test_folded_disk_pack_status_counts(self):
+        """ severity agrees with the flags, which include the bits the disk
+            pack status implies (4: mismatched disks, a red bit). """
+        e = make_drobo(StatusDevice(0, 0, 4)).GetStatusEx()
+        self.assertIn('Mismatched disks', e['flags'])
+        self.assertEqual(e['severity'], 'red')
+
+    def test_gen2(self):
+        d = make_drobo(StatusDevice(0x0004, 0, 1, 0, gen2=True))
+        self.assertEqual(d.GetStatusEx()['severity'], 'yellow')
+
+    def test_simulation(self):
+        with mock.patch.object(Drobo, 'DEBUG', Drobo.DBG_Simulation):
+            e = Drobo.Drobo.GetStatusEx(None)
+        self.assertEqual(e['severity'], Drobo._statusseverity(e['status']))
+
+
+class TestPrintHealthSeverity(unittest.TestCase):
+
+    def test_green(self):
+        out = run_printhealth(make_drobo(StatusDevice(HEALTHY_5D, 0, 1, 0)))
+        self.assertIn('Severity: green', out)
+        self.assertEqual(out.index('Severity: green'),
+                         out.index('Status: OK') + 1)
+
+    def test_red(self):
+        out = run_printhealth(make_drobo(StatusDevice(0x0040, 0)))
+        self.assertIn('Severity: red', out)
+
+    def test_simulation_output(self):
+        r = drobom('info', 'health')
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertIn('Severity: red', r.stdout)
+
+
 if __name__ == '__main__':
     unittest.main()
