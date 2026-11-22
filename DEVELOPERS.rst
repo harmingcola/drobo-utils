@@ -147,6 +147,10 @@ Run them before and after any change to Drobo.py, DroboIOctl.py or drobom.
 Since few developers still have every model to test with, the tests are the 
 main protection against breaking older units while adding newer ones.
 
+A GitHub Actions workflow to run the same tests on every push and pull request
+(Python 3.8 to 3.13) is proposed in pull request #4 of the harmingcola fork, as
+.github/workflows/tests.yml.
+
 
 Protocol Notes: Drobo S Gen 2 (USB 3)
 -------------------------------------
