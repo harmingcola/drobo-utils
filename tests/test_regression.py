@@ -168,6 +168,81 @@ class TestLegacyQueries(unittest.TestCase):
         self.assertEqual(slots[3][4], '')
 
 
+class RelayoutDevice(FakeDevice):
+    """ a legacy Drobo whose status sub-page reports a changing relay out
+        count (blocks left to re-protect.) """
+
+    def __init__(self):
+        self.count = 0
+        super().__init__(responder=self.respond)
+
+    def respond(self, sub_page):
+        if sub_page == 0x09:
+            body = struct.pack('>LL', 0, self.count)
+            return struct.pack('>BBH', 0x7a, 9, len(body)) + body
+        return legacy_subpage(sub_page)
+
+
+class TestRelayoutStatus(unittest.TestCase):
+    """ GetSubPageStatus while data protection (relay out) is running. """
+
+    def setUp(self):
+        self.dev = RelayoutDevice()
+        self.d = make_drobo(self.dev)
+        self.now = 1000000.0
+        patcher = mock.patch.object(Drobo.time, 'time', lambda: self.now)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def status(self, count, minutes_later=0):
+        self.now += minutes_later * 60
+        self.dev.count = count
+        return self.d.GetSubPageStatus()
+
+    def test_first_reading_has_no_estimate(self):
+        s, count = self.status(1000)
+        self.assertEqual(count, 1000)
+        self.assertIn('no estimate yet ', s)
+
+    def test_no_progress_yet(self):
+        self.status(1000)
+        s, count = self.status(1000, minutes_later=5)
+        self.assertIn('gathering stats, no estimate yet ', s)
+
+    def test_blocks_left_reported(self):
+        self.status(1000)
+        s, count = self.status(900, minutes_later=10)
+        self.assertIn('900 blocks left ', s)
+
+    def test_estimate_in_hours(self):
+        """ 10% done in 10 minutes: ~90 minutes left, shown rounded to hours
+            once an hour or more is left. """
+        self.status(1000)
+        s, count = self.status(900, minutes_later=10)
+        self.assertIn('about 2 hours left ', s)
+
+    def test_estimate_in_minutes(self):
+        self.status(1000)
+        s, count = self.status(100, minutes_later=45)  # 90% in 45 min: 5 left
+        self.assertIn('about 5 minutes left ', s)
+
+    def test_estimate_never_below_one_minute(self):
+        self.status(100000)
+        s, count = self.status(1, minutes_later=60)
+        self.assertIn('about 1 minute left ', s)
+
+    def test_timer_resets_after_relayout_completes(self):
+        self.status(1000)
+        self.status(500, minutes_later=10)
+        self.status(0, minutes_later=10)  # finished
+        s, count = self.status(800, minutes_later=60)  # a new relay out
+        self.assertIn('no estimate yet ', s)
+
+    def test_idle_unit_reports_nothing_extra(self):
+        s, count = self.status(0)
+        self.assertEqual((s, count), ([], 0))
+
+
 class TestConstructorSanityChecks(unittest.TestCase):
 
     def test_rejects_too_few_slots(self):

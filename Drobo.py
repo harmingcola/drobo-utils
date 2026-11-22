@@ -103,6 +103,19 @@ def _ledstatus(n):
     return colourstats[n & 0x0f]
 
 
+def _timeleft(minutes):
+    """ format an estimate of the minutes left, the way Drobo Dashboard does:
+        whole hours once an hour or more is left, otherwise whole minutes,
+        never less than one minute.
+    """
+    minutes = max(1, int(minutes + 0.5))
+    if minutes >= 60:
+        n, unit = (minutes + 30) // 60, 'hour'
+    else:
+        n, unit = minutes, 'minute'
+    return 'about %d %s%s left ' % (n, unit, '' if n == 1 else 's')
+
+
 def _unitstatus(n):
     """ return string, given numeric unit status 
    
@@ -1364,12 +1377,13 @@ class Drobo:
                 if amtdone == 0:
                     s.append('gathering stats, no estimate yet ')
                 else:
-                    rate = pctdone / runningtime
-                    timeleft = pctleft * rate  # timeleft in minutes...
+                    rate = pctdone / runningtime  # percent per minute
+                    timeleft = pctleft / rate  # timeleft in minutes...
                     s.append('%d blocks left ' % ss[1])
+                    s.append(_timeleft(timeleft))
         else:
             if self.relaystart > 0:
-                self.relaystart == 0
+                self.relaystart = 0
 
         return (s, ss[1])
 
