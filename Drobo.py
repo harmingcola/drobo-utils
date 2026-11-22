@@ -117,6 +117,24 @@ def _timeleft(minutes):
     return 'about %d %s%s left ' % (n, unit, '' if n == 1 else 's')
 
 
+def _drivetype(code):
+    """ (media, interface) for the disk type byte of sub-page 0x35:
+        0 HDD/SATA, 1 HDD/SAS, 2 SSD/SATA, 3 SSD/SAS, 4 SSD/mSATA,
+        255 empty slot.
+    """
+    if code == 255:
+        return ('', '')
+    return {0: ('HDD', 'SATA'), 1: ('HDD', 'SAS'), 2: ('SSD', 'SATA'),
+            3: ('SSD', 'SAS'), 4: ('SSD', 'mSATA')}.get(code,
+                                                       ('unknown', 'unknown'))
+
+
+def _diskhealth(state):
+    """ health from the low four bits of the disk state of sub-page 0x35. """
+    return {0: 'Good', 1: 'Healed', 2: 'Warning', 3: 'Failed'}.get(state & 0x0f,
+                                                                  'Unknown')
+
+
 def _pagebody(out, sub_page):
     """ given bytes starting at a page 0x3A sub page header, return the sub
         page body (as long as its header says, or as much as arrived), or
@@ -1494,7 +1512,9 @@ class Drobo:
 
           slot, status, errors, disk_state, disk_type, temperature,
           life_remaining, rotational_speed, manufacturer, firmware, serial,
-          total_capacity, managed_capacity
+          total_capacity, managed_capacity, and decoded from those:
+          health ('Good', 'Healed', 'Warning', 'Failed', 'Unknown'),
+          media ('HDD', 'SSD') and interface ('SATA', 'SAS', 'mSATA')
 
         or None when the firmware does not support the sub-page.
 
@@ -1516,7 +1536,8 @@ class Drobo:
                      'manufacturer': 'WDC WD30EFRX-68EUZN0',
                      'firmware': '82.00A82', 'serial': 'WD-SIMULATED%d' % i,
                      'total_capacity': 3000592982016,
-                     'managed_capacity': 2999000000000} for i in range(4)]
+                     'managed_capacity': 2999000000000, 'health': 'Good',
+                     'media': 'HDD', 'interface': 'SATA'} for i in range(4)]
 
         maxlen = 8 + 128 * max(self.slot_count, 8)  # room for padded records
         try:
@@ -1543,6 +1564,8 @@ class Drobo:
                           'rotational_speed': f[7], 'manufacturer': text[0],
                           'firmware': text[1], 'serial': text[2],
                           'total_capacity': f[11], 'managed_capacity': f[12]})
+            slots[-1]['health'] = _diskhealth(f[3])
+            slots[-1]['media'], slots[-1]['interface'] = _drivetype(f[4])
             off += stride
         return slots
 

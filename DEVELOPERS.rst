@@ -203,6 +203,9 @@ USB 3 era units:
    state (u32), disk type, temperature, life remaining, rotational speed, 
    manufacturer (44), firmware revision (12), serial (24), total and managed 
    capacity (u64 each.)
+   Disk type byte: 0 HDD/SATA, 1 HDD/SAS, 2 SSD/SATA, 3 SSD/SAS, 4 SSD/mSATA, 
+   255 empty.  Health is the low four bits of disk state: 0 good, 1 healed, 
+   2 warning, 3 failed.  The rotational speed code is not yet decoded.
 
  * Other sub-pages the vendor's software reads, not yet used here: 0x11 disk 
    pack info, 0x33 system info, 0x37 fans, 0x3A battery.

@@ -560,6 +560,27 @@ class TestSlotInfo2(unittest.TestCase):
         d = make_drobo(SlotInfo2Device(None))
         self.assertIsNone(d.GetSlotInfo2())
 
+    def test_drive_type_codes(self):
+        """ one byte gives both media and interface. """
+        for code, want in ((0, ('HDD', 'SATA')), (1, ('HDD', 'SAS')),
+                           (2, ('SSD', 'SATA')), (3, ('SSD', 'SAS')),
+                           (4, ('SSD', 'mSATA')), (255, ('', '')),
+                           (9, ('unknown', 'unknown'))):
+            self.assertEqual(Drobo._drivetype(code), want, code)
+
+    def test_disk_health_codes(self):
+        """ health is the low four bits of the disk state. """
+        for state, want in ((0, 'Good'), (1, 'Healed'), (2, 'Warning'),
+                            (3, 'Failed'), (0x12, 'Warning'), (7, 'Unknown')):
+            self.assertEqual(Drobo._diskhealth(state), want, state)
+
+    def test_decoded_fields(self):
+        page = slotinfo2_page([slot_record2(0)])  # state 2, type 1
+        s = make_drobo(SlotInfo2Device(page)).GetSlotInfo2()
+        self.assertEqual((s[0]['health'], s[0]['media'], s[0]['interface']),
+                         ('Warning', 'HDD', 'SAS'))
+        self.assertEqual((s[0]['disk_state'], s[0]['disk_type']), (2, 1))
+
     def test_gen2(self):
         page = slotinfo2_page([slot_record2(i) for i in range(5)])
         s = make_drobo(SlotInfo2Device(page, gen2=True)).GetSlotInfo2()
@@ -739,6 +760,8 @@ class TestSimulationMode(unittest.TestCase):
         r = self.drobom('info', 'drives')
         self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
         self.assertIn('Life', r.stdout)
+        self.assertIn('Health', r.stdout)
+        self.assertIn('SATA', r.stdout)
 
     def test_info_health(self):
         r = self.drobom('info', 'health')
