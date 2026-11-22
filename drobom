@@ -189,7 +189,7 @@ def printscsi(d):
 
 
 def printvolumes(d):
-    luns = d.GetLUNsInfoEx()
+    luns = d.GetLUNsInfoBest()
     if luns is None:
         print('extended volume information is not supported by this firmware')
         return
@@ -197,6 +197,11 @@ def printvolumes(d):
     for l in luns:
         print('%3d %9d  %-32s  %s' % (l['index'], togig(l['total_capacity']),
                                        l['name'][:32], ', '.join(l['format_name'])))
+        for i in l.get('initiators', []):
+            if i['address']:
+                print('      initiator: %s (%s)' % (i['name'], i['address']))
+            else:
+                print('      initiator: %s' % i['name'])
 
 
 def printdrives(d):

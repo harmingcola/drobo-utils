@@ -293,6 +293,7 @@ def _unitfeatures(norig):
                    (0x8000, 'SUPPORTS_SHUTDOWN'), (0x10000, 'feature x10000'),
                    (0x20000, 'SUPPORTS_ISCSI'), (0x40000, 'feature x40000'),
                    (0x80000, 'feature x80000'),
+                   (0x800000, 'SUPPORTS_LUNINFO_EX2'),
                    (0x40000000, 'SUPPORTS_VOLUME_RENAME'),
                    (0x80000000, 'SUPPORTS_SINGLE_LUN_FORMAT')]
     f = []
@@ -1572,17 +1573,23 @@ class Drobo:
     # system operations (0xEA) this module may send as reads.  Others exist
     # (firmware download, standby, power off, ...): never add one here without
     # proof that it is a pure read.
-    _SYSTEM_READ_OPS = (0x81,)  # 0x81: extended LUN info (GET_LUNINFO_EX2)
+    _SYSTEM_READ_OPS = (
+        0x81,  # extended LUN info: data-in, only ever polled for display.
+        0x83,  # extended LUN info v2 (ESA_SYSOPID_GET_LUNINFO_EX2): data-in,
+               # same request shape as 0x81, polled for display by the
+               # vendor's software when the firmware advertises 0x800000.
+    )
 
-    def __system_read(self, op, arg, length):
+    def __system_read(self, op, arg, length, last=0):
         """ issue a vendor unique system operation that returns data:
-            ea 10 80 <op> <arg> 00 21 <length16> 00, as the vendor's software
-            does.  Only operations listed in _SYSTEM_READ_OPS are allowed.
+            ea 10 80 <op> <arg> 00 21 <length16> <last>, as the vendor's
+            software does.  Only operations listed in _SYSTEM_READ_OPS are
+            allowed.
         """
         if op not in self._SYSTEM_READ_OPS:
             raise DroboException("system operation 0x%02x not allowed" % op)
         cdb = struct.pack(">BBBBBBBHB", 0xea, 0x10, 0x80, op, arg & 0xff, 0,
-                          0x21, length, 0)
+                          0x21, length, last & 0xff)
         return self.fd.get_sub_page(length, cdb, 0, DEBUG)
 
     def GetLUNsInfoEx(self):
@@ -1634,6 +1641,99 @@ class Drobo:
             if not more or last is None:
                 break
             start = last + 1
+        return luns
+
+    def GetLUNsInfoEx2(self):
+        """ extended LUN (volume) information, version 2, via system
+        operation 0x83.  Only sent when the firmware advertises it
+        (feature SUPPORTS_LUNINFO_EX2, 0x800000), as the vendor's software
+        does.  Returns a list of dictionaries with the GetLUNsInfoEx keys
+        plus:
+
+          version     reply format version (byte 0 of each reply)
+          initiators  list of {'name': ..., 'address': 'a.b.c.d' or None}
+          ex2_flag    flags_b bit 2, from version 2 replies (meaning unknown)
+
+        or None when the unit does not support it.
+
+        Reply: byte 0 version, byte 1 entry count, byte 2 bit 0 'more to
+        come' (ask again from the next LUN index.)  Entries start at byte 3
+        and are variable length: the same 285 bytes as GetLUNsInfoEx, where
+        flags_a (offset 263) is a count n, followed by n names of 224 bytes
+        and, in version 2 replies, n IPv4 addresses (4 bytes each, network
+        order.)
+
+        STATUS: from the vendor's software, untested on hardware.  The
+        names and addresses are probably iSCSI initiators logged in to the
+        LUN (names fit an iSCSI qualified name), unconfirmed.  Layout with
+        more than one name per entry is inferred from the entry stride.
+        """
+        if DEBUG & DBG_Simulation:
+            return [{'index': 0, 'lun': 0, 'name': 'Drobo volume 1',
+                     'total_capacity': 17592186044416,
+                     'second_capacity': 4398046511104, 'format': 0x08,
+                     'format_name': _partformat(0x08), 'flags_a': 0,
+                     'flags_b': 1, 'version': 2, 'ex2_flag': False,
+                     'initiators': []}]
+
+        if 'SUPPORTS_LUNINFO_EX2' not in self.features:
+            return None
+
+        luns = []
+        start = 0
+        for _ in range(32):  # bounded, whatever the unit says
+            try:
+                data = self.__system_read(0x83, start, 0x7c00, 1)
+            except (IOError, DroboException):
+                return None if not luns else luns
+            if len(data) < 3:
+                break
+            version, count, more = data[0], data[1], data[2] & 1
+            off = 3
+            last = None
+            for i in range(count):
+                e = data[off:off + 285]
+                if len(e) < 285:
+                    break
+                f = struct.unpack('>BL258sBBQQL', e)
+                n = f[3]
+                names_end = off + 285 + 224 * n
+                end = names_end + (4 * n if version >= 2 else 0)
+                if len(data) < end:
+                    break
+                initiators = []
+                for k in range(n):
+                    raw = data[off + 285 + 224 * k:off + 285 + 224 * (k + 1)]
+                    addr = None
+                    if version >= 2:
+                        a = data[names_end + 4 * k:names_end + 4 * k + 4]
+                        addr = '.'.join(str(b) for b in a)
+                    initiators.append({
+                        'name': raw.split(b'\0')[0].decode('latin-1').strip(),
+                        'address': addr})
+                luns.append({'index': f[0], 'lun': f[1],
+                             'name': f[2].split(b'\0')[0].decode('latin-1').strip(),
+                             'flags_a': f[3], 'flags_b': f[4],
+                             'total_capacity': f[5], 'second_capacity': f[6],
+                             'format': f[7], 'format_name': _partformat(f[7]),
+                             'version': version,
+                             'ex2_flag': version >= 2 and bool(f[4] & 4),
+                             'initiators': initiators})
+                last = f[0]
+                off = end
+            if not more or last is None:
+                break
+            start = last + 1
+        return luns
+
+    def GetLUNsInfoBest(self):
+        """ the best extended LUN information the unit offers: version 2
+        (GetLUNsInfoEx2) when the firmware advertises it, otherwise, or if
+        that fails, GetLUNsInfoEx.  None when neither is supported.
+        """
+        luns = self.GetLUNsInfoEx2()
+        if luns is None:
+            luns = self.GetLUNsInfoEx()
         return luns
 
     def GetRelayoutEstimate(self):

@@ -189,8 +189,27 @@ USB 3 era units:
    LUN index, flags 0x21, 1024 bytes.  Reply: entry count (byte 1), 'more' 
    flag (byte 2 bit 0; ask again from the next index), then 285 byte entries: 
    index, lun (u32), name (258), two flag bytes, total capacity (u64), a 
-   second capacity (u64, probably used), format (u32, as _partformat.)  
+   second capacity (u64, probably used), format (u32, as _partformat.)
    Drobo.py only issues system reads listed in Drobo._SYSTEM_READ_OPS.
+
+ * Extended LUN info version 2 (GetLUNsInfoEx2) is system operation 0x83
+   (named ESA_SYSOPID_GET_LUNINFO_EX2 in the vendor's software):
+   ea 10 80 83 <first LUN index> 00 21 7c 00 01, a 31744 byte read.  It
+   differs from op 0x81 only in the op code, the length and the last byte.
+   The vendor's software issues it as a data-in request (the same
+   pass-through path as INQUIRY and MODE SENSE), from its periodic status
+   poll only, and only when the firmware feature table has bit 0x800000
+   (SUPPORTS_LUNINFO_EX2); otherwise it uses op 0x81.  Reply: format
+   version (byte 0), entry count (byte 1), 'more' flag (byte 2 bit 0, paged
+   as op 0x81), then variable length entries: the 285 byte op 0x81 entry,
+   whose first flag byte (offset 263) is a count n, followed by n names of
+   224 bytes and, from version 2, n IPv4 addresses (4 bytes, network
+   order.)  From version 2, bit 2 of the second flag byte is a flag of
+   unknown meaning.  The names and addresses look like iSCSI initiators
+   logged in to the LUN (unconfirmed; the vendor's parser only handles one
+   name per entry correctly, so the layout for several is inferred from
+   the entry stride.)  drobom info volumes uses GetLUNsInfoBest(): version
+   2 if advertised and working, else op 0x81.
 
  * Status, sub-page 0x09, is variable length.  Big endian u32s after the 4 
    byte page header: status bits, relay out count (the 12 byte form), then 
