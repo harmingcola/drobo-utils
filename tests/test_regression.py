@@ -146,6 +146,14 @@ class TestLegacyQueries(unittest.TestCase):
             struct.pack('>BBBBBBBHB', 0x5a, 0, 0x3a, 0x01, 0, 0, 0, paklen, 0)
         ])
 
+    def test_status_cdb_is_unchanged(self):
+        self.dev.cdbs.clear()
+        self.d.GetSubPageStatus()
+        paklen = struct.calcsize('>BBHLL')
+        self.assertEqual(self.dev.cdbs, [
+            struct.pack('>BBBBBBBHB', 0x5a, 0, 0x3a, 0x09, 0, 0, 0, paklen, 0)
+        ])
+
     def test_one_query_per_sub_page(self):
         self.dev.cdbs.clear()
         self.d.GetSubPageCapacity()
@@ -336,6 +344,99 @@ class TestRelayoutStatus(unittest.TestCase):
         self.assertEqual((s, count), ([], 0))
 
 
+class StatusDevice(FakeDevice):
+    """ legacy Drobo whose status sub-page (0x09) has a chosen set of u32
+        fields: status, relay out count [, disk pack status
+        [, double degraded count [, extra]]].  Longer forms come from newer
+        firmware. """
+
+    def __init__(self, *fields, gen2=False):
+        self.fields = fields
+        if gen2:
+            resp = gen2_responder()
+            inner = resp
+
+            def respond(sub_page, mcb):
+                if sub_page == 0x09 and mcb[1] & 0x08:
+                    page = self.status_page()
+                    return struct.pack('>HBBBBH', 6 + len(page), 0, 0, 0, 0,
+                                       0) + page
+                return inner(sub_page, mcb)
+
+            respond.wants_cdb = True
+            super().__init__(responder=respond)
+        else:
+            super().__init__(responder=self.respond)
+
+    def status_page(self):
+        body = struct.pack('>%dL' % len(self.fields), *self.fields)
+        return struct.pack('>BBH', 0x7a, 0x09, len(body)) + body
+
+    def respond(self, sub_page):
+        if sub_page == 0x09:
+            return self.status_page()
+        return legacy_subpage(sub_page)
+
+
+class TestStatusEx(unittest.TestCase):
+    """ GetStatusEx: the longer status sub-page newer firmware returns. """
+
+    def test_legacy_12_byte_page(self):
+        d = make_drobo(StatusDevice(0x0040, 0))
+        e = d.GetStatusEx()
+        self.assertEqual(e['flags'], ['No redundancy'])
+        self.assertEqual(e['relayout_count'], 0)
+        self.assertIsNone(e['diskpack_status'])
+        self.assertIsNone(e['double_degraded'])
+
+    def test_diskpack_status_16_bytes(self):
+        d = make_drobo(StatusDevice(0, 0, 1))
+        e = d.GetStatusEx()
+        self.assertEqual(e['diskpack_status'], 1)
+        self.assertEqual(e['flags'], [])
+
+    def test_diskpack_status_maps_to_flags(self):
+        """ the vendor's software folds the disk pack status into the
+            status flags: 2 unknown version, 3 unknown error, 4 mismatched,
+            5-7 too many missing disks. """
+        for dp, flag in ((2, 'Unknown version'), (3, 'Unknown error'),
+                         (4, 'Mismatched disks'),
+                         (5, 'Too many missing disks'),
+                         (7, 'Too many missing disks')):
+            d = make_drobo(StatusDevice(0, 0, dp))
+            self.assertIn(flag, d.GetStatusEx()['flags'], dp)
+
+    def test_double_degraded_20_bytes(self):
+        d = make_drobo(StatusDevice(0x0040, 500, 1, 2))
+        e = d.GetStatusEx()
+        self.assertEqual(e['double_degraded'], 2)
+        self.assertEqual(e['relayout_count'], 500)
+        self.assertIsNone(e['extra'])
+
+    def test_extra_field_24_bytes(self):
+        d = make_drobo(StatusDevice(0, 0, 1, 0, 0xdeadbeef))
+        self.assertEqual(d.GetStatusEx()['extra'], 0xdeadbeef)
+
+    def test_gen2(self):
+        d = make_drobo(StatusDevice(0x0040, 7, 1, 0, gen2=True))
+        e = d.GetStatusEx()
+        self.assertEqual((e['relayout_count'], e['diskpack_status'],
+                          e['double_degraded']), (7, 1, 0))
+
+    def test_wrong_page_rejected(self):
+        dev = StatusDevice(0, 0, 1)
+        d = make_drobo(dev)
+        dev.status_page = lambda: legacy_subpage(0x02)
+        with self.assertRaises(Drobo.DroboException):
+            d.GetStatusEx()
+
+    def test_get_sub_page_status_unchanged(self):
+        """ the old API still reads only the 12 byte form. """
+        dev = StatusDevice(0x0040, 0, 4, 0)
+        d = make_drobo(dev)
+        self.assertEqual(d.GetSubPageStatus(), (['No redundancy'], 0))
+
+
 class TestConstructorSanityChecks(unittest.TestCase):
 
     def test_rejects_too_few_slots(self):
@@ -499,6 +600,15 @@ class TestSimulationMode(unittest.TestCase):
         r = self.drobom('status')
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn('TRUSTED DATA', r.stdout)
+
+    def test_info_health(self):
+        r = self.drobom('info', 'health')
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertIn('redundancy', r.stdout.lower())
+
+    def test_info_status(self):
+        r = self.drobom('info', 'status')
+        self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_info(self):
         r = self.drobom('info', 'config,capacity,firmware,settings,protocol')

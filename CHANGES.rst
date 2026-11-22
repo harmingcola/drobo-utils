@@ -29,6 +29,9 @@ unreleased
   * status: estimated completion time ("done around Tue 03:40"), and the
     relay out starting point is saved between runs, so one shot 'drobom status'
     gives an estimate from its second run.  GetRelayoutEstimate() API.
+  * GetStatusEx(): longer status record of newer firmware (disk pack status,
+    double degraded count), disk pack status folded into the flags.
+  * drobom info health: redundancy summary, status, data protection progress.
   * add hardware-free regression tests (make test.)
   * DEVELOPERS: protocol notes for the Drobo S Gen 2.
 

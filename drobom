@@ -18,7 +18,7 @@ import textwrap
 import subprocess
 
 valid_print = ("config", "capacity", "protocol", "scsi", "slots", "firmware",
-               "status", "options", "luns")
+               "status", "options", "luns", "health")
 
 opt_str = ', '.join(valid_print)
 
@@ -186,6 +186,31 @@ def printscsi(d):
               ( c, host, channel, id, lun, vendor, version ))
         else:
             print(str((c, host, channel, id, lun, vendor, version)))
+
+
+def printhealth(d):
+    e = d.GetStatusEx()
+    if 'No redundancy' in e['flags']:
+        r = 'NOT protected (no redundancy)'
+    elif e['relayout_count']:
+        r = 'data protection in progress'
+    else:
+        r = 'protected'
+    print('Redundancy: %s' % r)
+    print('Status: %s' % (', '.join(e['flags']) or 'OK'))
+    if e['relayout_count']:
+        est = d.GetRelayoutEstimate()
+        if est is None:
+            print('Data protection: %d blocks left, no estimate yet' %
+                  e['relayout_count'])
+        else:
+            print('Data protection: %.1f%% done, %s, %s' % (est['percent_done'], \
+                Drobo._timeleft(est['minutes_left']).strip(),
+                Drobo._completion(est['eta']).strip()))
+    for k, label in (('diskpack_status', 'Disk pack status'),
+                     ('double_degraded', 'Double degraded count')):
+        if e[k] is not None:
+            print('%s: %d' % (label, e[k]))
 
 
 def printstatus(d):

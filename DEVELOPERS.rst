@@ -176,9 +176,19 @@ USB 3 era units:
    diagnostics, the user event log, standby and power off.  Treat any new 
    0xEA operation as dangerous until proven to be a pure read.
 
- * Status: the vendor's software reads, besides the status bits and relay out 
-   count of sub-page 0x09, a disk pack status and a 'double degraded' count, 
-   and treats status as 64 bits wide.  Not yet decoded here.
+ * Status, sub-page 0x09, is variable length.  Big endian u32s after the 4 
+   byte page header: status bits, relay out count (the 12 byte form), then 
+   disk pack status (16 bytes), double degraded count (20 bytes), and a 
+   further value of unknown meaning (24 bytes.)  Older firmware returns the 
+   12 byte form.  GetStatusEx() reads whatever the unit returns.  The vendor's 
+   software folds disk pack status into the status bits: 2 -> 0x1000, 
+   3 -> 0x10000000, 4 -> 0x800, 5..7 -> 0x20, 8 -> 0x40000.  It also treats 
+   status as 64 bits wide; the meaning of most bits above 0x4000 is unknown.
+
+ * Other sub-pages the vendor's software reads, not yet used here: 0x11 disk 
+   pack info, 0x33 system info, 0x35 slot info 2 (per drive: error count, 
+   disk state, type, temperature, life remaining, rotational speed, maker, 
+   firmware revision, serial, capacities), 0x37 fans, 0x3A battery.
 
  * Relay out (data protection) time left is not reported by the unit.  It is 
    estimated from how fast the relay out count falls since the relay out was 
