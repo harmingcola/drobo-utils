@@ -129,6 +129,28 @@ def _drivetype(code):
                                                        ('unknown', 'unknown'))
 
 
+def _driverpm(code):
+    """ spindle speed in RPM for the rotational speed byte of sub-page 0x35.
+        The byte counts in steps of 200 RPM (36 is 7200 RPM); 1 means the
+        drive does not spin (an SSD) and gives 0; 0 means the speed is
+        unknown and gives None.
+    """
+    if code == 0:
+        return None
+    if code == 1:
+        return 0
+    return code * 200
+
+
+def _rpmtext(rpm):
+    """ short text for a speed from _driverpm: '7200', '-' for a drive that
+        does not spin, '?' when unknown.
+    """
+    if rpm is None:
+        return '?'
+    return str(rpm) if rpm else '-'
+
+
 def _diskhealth(state):
     """ health from the low four bits of the disk state of sub-page 0x35. """
     return {0: 'Good', 1: 'Healed', 2: 'Warning', 3: 'Failed'}.get(state & 0x0f,
@@ -1515,7 +1537,9 @@ class Drobo:
           life_remaining, rotational_speed, manufacturer, firmware, serial,
           total_capacity, managed_capacity, and decoded from those:
           health ('Good', 'Healed', 'Warning', 'Failed', 'Unknown'),
-          media ('HDD', 'SSD') and interface ('SATA', 'SAS', 'mSATA')
+          media ('HDD', 'SSD'), interface ('SATA', 'SAS', 'mSATA') and
+          rpm (spindle speed: rotational_speed * 200, 0 for a drive that does
+          not spin, None when unknown; see _driverpm)
 
         or None when the firmware does not support the sub-page.
 
@@ -1533,12 +1557,13 @@ class Drobo:
         if DEBUG & DBG_Simulation:
             return [{'slot': i, 'status': 1, 'errors': 0, 'disk_state': 2,
                      'disk_type': 1, 'temperature': 35 + i,
-                     'life_remaining': 100 - 7 * i, 'rotational_speed': 72,
+                     'life_remaining': 100 - 7 * i, 'rotational_speed': 36,
                      'manufacturer': 'WDC WD30EFRX-68EUZN0',
                      'firmware': '82.00A82', 'serial': 'WD-SIMULATED%d' % i,
                      'total_capacity': 3000592982016,
                      'managed_capacity': 2999000000000, 'health': 'Good',
-                     'media': 'HDD', 'interface': 'SATA'} for i in range(4)]
+                     'media': 'HDD', 'interface': 'SATA',
+                     'rpm': _driverpm(36)} for i in range(4)]
 
         maxlen = 8 + 128 * max(self.slot_count, 8)  # room for padded records
         try:
@@ -1567,6 +1592,7 @@ class Drobo:
                           'total_capacity': f[11], 'managed_capacity': f[12]})
             slots[-1]['health'] = _diskhealth(f[3])
             slots[-1]['media'], slots[-1]['interface'] = _drivetype(f[4])
+            slots[-1]['rpm'] = _driverpm(f[7])
             off += stride
         return slots
 

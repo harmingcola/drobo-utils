@@ -233,7 +233,10 @@ USB 3 era units:
    capacity (u64 each.)
    Disk type byte: 0 HDD/SATA, 1 HDD/SAS, 2 SSD/SATA, 3 SSD/SAS, 4 SSD/mSATA, 
    255 empty.  Health is the low four bits of disk state: 0 good, 1 healed, 
-   2 warning, 3 failed.  The rotational speed code is not yet decoded.
+   2 warning, 3 failed.  Rotational speed counts in steps of 200 RPM (27 is 
+   5400, 36 is 7200); 1 means a drive that does not spin (an SSD) and 0 an 
+   unknown speed.  The vendor's service passes the byte through untouched; 
+   its user interface does the conversion.
 
  * Other sub-pages the vendor's software reads, not yet used here: 0x11 disk 
    pack info, 0x33 system info, 0x37 fans, 0x3A battery.

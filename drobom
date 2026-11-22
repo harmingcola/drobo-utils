@@ -209,15 +209,16 @@ def printdrives(d):
     if slots is None:
         print('per-drive details are not supported by this firmware')
         return
-    print('Slot  Size(GB)  Health   Type      Temp(C)  Life(%)  Errors  Model                    Firmware  Serial')
+    print('Slot  Size(GB)  Health   Type      Temp(C)  Life(%)  Errors    RPM  Model                    Firmware  Serial')
     for r in slots:
         if not r['total_capacity']:
             print('%4d  empty' % r['slot'])
             continue
-        print('%4d %9d  %-8s %-9s %7d %8d %7d  %-24s %-9s %s' % \
+        print('%4d %9d  %-8s %-9s %7d %8d %7d %6s  %-24s %-9s %s' % \
               (r['slot'], togig(r['total_capacity']), r['health'],
                ('%s/%s' % (r['media'], r['interface']))[:9], r['temperature'],
-               r['life_remaining'], r['errors'], r['manufacturer'][:24],
+               r['life_remaining'], r['errors'], Drobo._rpmtext(r['rpm']),
+               r['manufacturer'][:24],
                r['firmware'][:9], r['serial']))
 
 
