@@ -24,6 +24,9 @@ unreleased
 ----------
 
   * Drobo S Gen 2 (USB 3): found by INQUIRY product id (vendor is 'USB 3.0'.)
+  * discovery: table of known INQUIRY identities (DroboIOctl.DROBO_IDENTITIES)
+    covering Gen3, 5D, 5D3, 5C, 8D, Mini, Pro, Elite, B800i/B810i/B1200i;
+    Drobo.model and drobom -v 16 name the model.  Untested on those units.
   * Drobo S Gen 2: read sub-pages that follow a mode parameter header (DBD).
   * fix relay out time estimate (was inverted, never shown, never reset.)
   * status: estimated completion time ("done around Tue 03:40"), and the

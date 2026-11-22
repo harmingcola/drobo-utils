@@ -276,6 +276,71 @@ class DroboIOctl:
 
 import os
 
+# How Drobos identify themselves in standard INQUIRY data (vendor: 8 chars,
+# product: 16 chars, both space padded.)  Each rule is
+#   (vendor prefix, product prefix, model name)
+# compared case-insensitively; the first rule that matches wins, so longer
+# product prefixes come before shorter ones from the same vendor.
+# An empty prefix matches anything.  Sources: the identities the vendor's Mac
+# SCSI driver attaches to, and units seen in the field.  See "How Drobos
+# identify themselves" in DEVELOPERS.rst.
+DROBO_IDENTITIES = [
+    # first and second generation Drobo (Data Robotics' old vendor name.)
+    ('trusted', '', 'Drobo (gen 1/2)'),
+    # Thunderbolt connections add ' - TB' to the product id.
+    ('drobo', '5d3 - tb', 'Drobo 5D3 (Thunderbolt)'),
+    ('drobo', '5d3', 'Drobo 5D3'),
+    ('drobo', '5d - tb', 'Drobo 5D (Thunderbolt)'),
+    ('drobo', '5d', 'Drobo 5D'),
+    ('drobo', '5c', 'Drobo 5C'),
+    ('drobo', '8d - tb', 'Drobo 8D (Thunderbolt)'),
+    ('drobo', '8d', 'Drobo 8D'),
+    ('drobo', 'mini - tb', 'Drobo Mini (Thunderbolt)'),
+    ('drobo', 'mini', 'Drobo Mini'),
+    ('drobo', 'b1200i', 'Drobo B1200i'),
+    ('drobo', 'b810i', 'Drobo B810i'),
+    ('drobo', 'b800i', 'Drobo B800i'),
+    ('drobo', 'droboelite', 'DroboElite'),
+    ('drobo', 'drobopro', 'DroboPro'),
+    ('drobo', 'drobo3', 'Drobo (gen 3)'),
+    ('drobo', 'gen3', 'Drobo (gen 3)'),
+    ('drobo', '3rd gen', 'Drobo (gen 3)'),
+    ('drobo', '', 'Drobo'),
+    # Drobo S Gen 2 on USB 3: the bridge reports a generic vendor.
+    ('usb 3.0', 'drobo s', 'Drobo S (gen 2)'),
+    # any other vendor, but a Drobo product id.
+    ('', 'drobo', 'Drobo'),
+]
+
+
+def _inquiry_text(field):
+    """ an INQUIRY text field (bytes or str), lower case, for matching. """
+    if isinstance(field, bytes):
+        field = field.decode('ascii', 'replace')
+    return field.lower()
+
+
+def identify_drobo(vendor, product, extra_vendor=None):
+    """
+      return the model name for a device with the given INQUIRY vendor and
+      product ids, or None if it does not look like a Drobo.
+
+      extra_vendor is the drobom -s string: any vendor starting with it is
+      also accepted, as an unrecognised model.  (An empty string accepts
+      every device; the Drobo() constructor checks are then the only filter.)
+
+      Not every match is a Drobo (the rules are prefixes); Drobo.Drobo()
+      sanity checks remain the final filter.
+    """
+    v = _inquiry_text(vendor)
+    p = _inquiry_text(product)
+    for vendor_prefix, product_prefix, model in DROBO_IDENTITIES:
+        if v.startswith(vendor_prefix) and p.startswith(product_prefix):
+            return model
+    if extra_vendor is not None and v.startswith(extra_vendor.lower()):
+        return 'unrecognised model (accepted by -s)'
+    return None
+
 
 def drobolunlist(debugflags=0, vendor="Drobo"):
     """
@@ -321,15 +386,11 @@ def drobolunlist(debugflags=0, vendor="Drobo"):
                 print("id: ", id)
 
             thisdev = "%02d%02d%02d" % (id[0], id[1], id[2])
-            # The Drobo S Gen 2 (USB 3.0) reports vendor 'USB 3.0' and
-            # product 'Drobo S - Gen 2', so also accept a Drobo product id.
             # Non-Drobos that slip through are rejected by Drobo.Drobo() checks.
-            if ( id[4].lower().startswith("trusted") or \
-                 id[4].lower().startswith("drobo") or \
-                 id[4].lower().startswith(vendor.lower()) or \
-                 id[5].lower().startswith("drobo") ):  # you have a Drobo!
+            model = identify_drobo(id[4], id[5], vendor)
+            if model:  # you have a Drobo!
                 if debugflags & Drobo.DBG_Detection:
-                    print("found a Drobo")
+                    print("found a Drobo: %s" % model)
                 if thisdev == previousdev:  # multi-lun drobo...
                     if debugflags & Drobo.DBG_Detection:
                         print("appending to lundevs...")

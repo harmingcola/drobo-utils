@@ -69,6 +69,27 @@ physical channel is below:
 | Drobo  | n/a  | n/a  |  data   |   n/a     | n/a   |   2?    |
 |   FS   | (15) | (?)  |  (0)    |   (?)     | (0)   |         |
 +--------+------+------+---------+-----------+-------+---------+
+| Drobo  | ?*4  | ?*4  |  n/a    |   n/a     |  n/a  |   ?     |
+| (Gen3) | (?)  | (?)  |  (0)    |   (0)     |  (0)  |         |
++--------+------+------+---------+-----------+-------+---------+
+| Drobo  | ?*4  | n/a  |  n/a    |   n/a     |  n/a  |   ?     |
+| 5D/5D3 | (?)  | (0)  |  (0)    |   (0)     |  (0)  |         |
++--------+------+------+---------+-----------+-------+---------+
+| Drobo  | ?*4  | n/a  |  n/a    |   n/a     |  n/a  |   ?     |
+| 5C     | (?)  | (0)  |  (0)    |   (0)     |  (0)  |         |
++--------+------+------+---------+-----------+-------+---------+
+| Drobo  | ?*4  | n/a  |  n/a    |   n/a     |  n/a  |   ?     |
+| 8D     | (?)  | (0)  |  (0)    |   (0)     |  (0)  |         |
++--------+------+------+---------+-----------+-------+---------+
+| Drobo  | ?*4  | n/a  |  n/a    |   n/a     |  n/a  |   ?     |
+| Mini   | (?)  | (0)  |  (0)    |   (0)     |  (0)  |         |
++--------+------+------+---------+-----------+-------+---------+
+| B800i  | n/a  | n/a  |  n/a    |   ?*4     |  n/a  |   ?     |
+| B810i  | (0)  | (0)  |  (0)    |   (?)     |  (0)  |         |
++--------+------+------+---------+-----------+-------+---------+
+| B1200i | n/a  | n/a  |  n/a    |   ?*4     |  n/a  |   ?     |
+|        | (0)  | (0)  |  (0)    |   (?)     |  (0)  |         |
++--------+------+------+---------+-----------+-------+---------+
 
 .. parsed-literal::
 
@@ -85,6 +106,13 @@ physical channel is below:
   S Gen2 - the USB 3.0 Drobo S.  It reports vendor 'USB 3.0', and is found by
        its product id ('Drobo S - Gen 2').  Status queries are not yet confirmed 
        on a healthy unit (see DEVELOPERS.rst.)
+  \*3 - Thunderbolt (5D, 5D3, 8D, Mini) is not listed: it needs a driver for 
+       the Drobo Thunderbolt controller, which exists only for Mac OS X.  Use 
+       the USB port on Linux.
+  \*4 - untested.  Recognized automatically, by the identity the unit reports 
+       (known from the vendor's Mac driver), and drobom -v 16 names the model.  
+       Whether status and configuration queries work is unknown; reports welcome.  
+       See "How Drobos identify themselves" in DEVELOPERS.rst.
 
 
 .. [#GenSCSI] Linux drivers make disk, cdrom, and other peripherals, look
@@ -777,6 +805,11 @@ at the time this example was run.  so then try::
 
 In other words, take the unknown vendor string and feed it as -s option to tweak 
 detection of drobom.  Your drobo will likely then be picked up.
+
+Newer versions know the identities of every model listed in the compatibility 
+matrix, and the detection output names the model, e.g. 'found a Drobo: Drobo 5D'.  
+If yours is reported as 'unrecognised model', please send the 'id:' line so 
+it can be added to DroboIOctl.DROBO_IDENTITIES.
 
 
 Only One LUN Shows up?
