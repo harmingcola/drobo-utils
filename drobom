@@ -18,7 +18,7 @@ import textwrap
 import subprocess
 
 valid_print = ("config", "capacity", "protocol", "scsi", "slots", "firmware",
-               "status", "options", "luns")
+               "status", "options", "luns", "health", "drives")
 
 opt_str = ', '.join(valid_print)
 
@@ -186,6 +186,48 @@ def printscsi(d):
               ( c, host, channel, id, lun, vendor, version ))
         else:
             print(str((c, host, channel, id, lun, vendor, version)))
+
+
+def printdrives(d):
+    slots = d.GetSlotInfo2()
+    if slots is None:
+        print('per-drive details are not supported by this firmware')
+        return
+    print('Slot  Size(GB)  Health   Type      Temp(C)  Life(%)  Errors  Model                    Firmware  Serial')
+    for r in slots:
+        if not r['total_capacity']:
+            print('%4d  empty' % r['slot'])
+            continue
+        print('%4d %9d  %-8s %-9s %7d %8d %7d  %-24s %-9s %s' % \
+              (r['slot'], togig(r['total_capacity']), r['health'],
+               ('%s/%s' % (r['media'], r['interface']))[:9], r['temperature'],
+               r['life_remaining'], r['errors'], r['manufacturer'][:24],
+               r['firmware'][:9], r['serial']))
+
+
+def printhealth(d):
+    e = d.GetStatusEx()
+    if 'No redundancy' in e['flags']:
+        r = 'NOT protected (no redundancy)'
+    elif e['relayout_count']:
+        r = 'data protection in progress'
+    else:
+        r = 'protected'
+    print('Redundancy: %s' % r)
+    print('Status: %s' % (', '.join(e['flags']) or 'OK'))
+    if e['relayout_count']:
+        est = d.GetRelayoutEstimate()
+        if est is None:
+            print('Data protection: %d blocks left, no estimate yet' %
+                  e['relayout_count'])
+        else:
+            print('Data protection: %.1f%% done, %s, %s' % (est['percent_done'], \
+                Drobo._timeleft(est['minutes_left']).strip(),
+                Drobo._completion(est['eta']).strip()))
+    for k, label in (('diskpack_status', 'Disk pack status'),
+                     ('double_degraded', 'Double degraded count')):
+        if e[k] is not None:
+            print('%s: %d' % (label, e[k]))
 
 
 def printstatus(d):

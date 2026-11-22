@@ -29,6 +29,15 @@ unreleased
   * status: estimated completion time ("done around Tue 03:40"), and the
     relay out starting point is saved between runs, so one shot 'drobom status'
     gives an estimate from its second run.  GetRelayoutEstimate() API.
+  * GetStatusEx(): longer status record of newer firmware (disk pack status,
+    double degraded count), disk pack status folded into the flags.
+  * drobom info health: redundancy summary, status, data protection progress.
+  * GetSlotInfo2() and drobom info drives: per drive temperature, life
+    remaining, error count, model, firmware and serial (sub-page 0x35.)
+  * drives: decode health (good/healed/warning/failed) and drive type
+    (HDD/SSD, SATA/SAS/mSATA.)
+  * name status bits: incompatible disk pack, power supply missing, fan
+    partially failed, fan failed, fan missing.
   * add hardware-free regression tests (make test.)
   * DEVELOPERS: protocol notes for the Drobo S Gen 2.
 
