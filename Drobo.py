@@ -1569,6 +1569,73 @@ class Drobo:
             off += stride
         return slots
 
+    # system operations (0xEA) this module may send as reads.  Others exist
+    # (firmware download, standby, power off, ...): never add one here without
+    # proof that it is a pure read.
+    _SYSTEM_READ_OPS = (0x81,)  # 0x81: extended LUN info (GET_LUNINFO_EX2)
+
+    def __system_read(self, op, arg, length):
+        """ issue a vendor unique system operation that returns data:
+            ea 10 80 <op> <arg> 00 21 <length16> 00, as the vendor's software
+            does.  Only operations listed in _SYSTEM_READ_OPS are allowed.
+        """
+        if op not in self._SYSTEM_READ_OPS:
+            raise DroboException("system operation 0x%02x not allowed" % op)
+        cdb = struct.pack(">BBBBBBBHB", 0xea, 0x10, 0x80, op, arg & 0xff, 0,
+                          0x21, length, 0)
+        return self.fd.get_sub_page(length, cdb, 0, DEBUG)
+
+    def GetLUNsInfoEx(self):
+        """ extended LUN (volume) information, via system operation 0x81.
+        returns a list of dictionaries:
+
+          index, lun, name, total_capacity, second_capacity, format,
+          format_name, flags_a, flags_b
+
+        or None when the firmware does not support it.
+
+        Reply: byte 1 entry count, byte 2 bit 0 'more to come' (ask again
+        starting from the next LUN index), entries of 285 bytes from byte 3:
+        index u8, lun u32, name 258s, flags_a u8, flags_b u8,
+        total capacity u64, second capacity u64, format u32 (big endian.)
+
+        STATUS: from observed behaviour, untested on hardware.
+        second_capacity is probably the used capacity, unconfirmed.
+        """
+        if DEBUG & DBG_Simulation:
+            return [{'index': 0, 'lun': 0, 'name': 'Drobo volume 1',
+                     'total_capacity': 17592186044416,
+                     'second_capacity': 4398046511104, 'format': 0x08,
+                     'format_name': _partformat(0x08), 'flags_a': 0,
+                     'flags_b': 1}]
+
+        luns = []
+        start = 0
+        for _ in range(32):  # bounded, whatever the unit says
+            try:
+                data = self.__system_read(0x81, start, 1024)
+            except (IOError, DroboException):
+                return None if not luns else luns
+            if len(data) < 3:
+                break
+            count, more = data[1], data[2] & 1
+            last = None
+            for i in range(count):
+                e = data[3 + i * 285:3 + (i + 1) * 285]
+                if len(e) < 285:
+                    break
+                f = struct.unpack('>BL258sBBQQL', e)
+                luns.append({'index': f[0], 'lun': f[1],
+                             'name': f[2].split(b'\0')[0].decode('latin-1').strip(),
+                             'flags_a': f[3], 'flags_b': f[4],
+                             'total_capacity': f[5], 'second_capacity': f[6],
+                             'format': f[7], 'format_name': _partformat(f[7])})
+                last = f[0]
+            if not more or last is None:
+                break
+            start = last + 1
+        return luns
+
     def GetRelayoutEstimate(self):
         """ query the unit, and if data protection (relay out) is running and
         enough progress has been seen, return a dictionary:

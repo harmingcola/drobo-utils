@@ -183,6 +183,15 @@ USB 3 era units:
    diagnostics, the user event log, standby and power off.  Treat any new 
    0xEA operation as dangerous until proven to be a pure read.
 
+ * 0xEA system operation layout (10 bytes): ea 10 <dir> <op> <arg> <txid> 
+   <flags> <length16> <x>, where dir is 0x80 for a read (data from the unit.)  
+   The vendor's software reads extended LUN info with op 0x81, arg = first 
+   LUN index, flags 0x21, 1024 bytes.  Reply: entry count (byte 1), 'more' 
+   flag (byte 2 bit 0; ask again from the next index), then 285 byte entries: 
+   index, lun (u32), name (258), two flag bytes, total capacity (u64), a 
+   second capacity (u64, probably used), format (u32, as _partformat.)  
+   Drobo.py only issues system reads listed in Drobo._SYSTEM_READ_OPS.
+
  * Status, sub-page 0x09, is variable length.  Big endian u32s after the 4 
    byte page header: status bits, relay out count (the 12 byte form), then 
    disk pack status (16 bytes), double degraded count (20 bytes), and a 
