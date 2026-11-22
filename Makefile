@@ -3,6 +3,9 @@
 build: doc
 	python3 setup.py build
 
+test:
+	python3 -m unittest discover -s tests -v
+
 clean:
 	-python3 setup.py clean
 	-find . -name "*\.pyc" -delete

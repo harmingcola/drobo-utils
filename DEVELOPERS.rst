@@ -133,6 +133,21 @@ confusing to use one or the other method on a system.
 (if you do distutils install, then remove the debian package via: dpkg --purge drobo-utils)
 
 
+Running the Tests
+-----------------
+
+There are regression tests in the tests/ directory.  They need no Drobo: the
+SCSI generic layer is replaced by a fake device that answers the way first 
+generation Drobos do, and drobom itself is exercised in simulation mode (-v 128)::
+
+  boule% make test
+  boule% python3 -m unittest discover -s tests -v   # same thing.
+
+Run them before and after any change to Drobo.py, DroboIOctl.py or drobom.
+Since few developers still have every model to test with, the tests are the 
+main protection against breaking older units while adding newer ones.
+
+
 Making a Release
 ----------------
 
