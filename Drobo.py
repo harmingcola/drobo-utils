@@ -289,6 +289,10 @@ class Drobo:
 
         self.relaystart = 0
 
+        # 'legacy': page 0x3A comes back raw (first generation Drobos...)
+        # 'dbd': page follows a mode parameter header (Drobo S Gen 2, USB 3)
+        self.mode_sense_style = 'legacy'
+
         if DEBUG & DBG_Simulation:
             self.GetSubPageFirmware() \
             #for the side effect, self.fw & self.features get set
@@ -456,13 +460,24 @@ class Drobo:
             print('DMIP sub_page query:0x%02x pattern: %s ' %
                   (sub_page, mypack))
 
-        modepageblock = struct.pack(">BBBBBBBHB", 0x5a, 0, 0x3a, sub_page, 0,
-                                    0, 0, paklen, 0)
+        cmdout = None
+        if self.mode_sense_style == 'legacy':
+            modepageblock = struct.pack(">BBBBBBBHB", 0x5a, 0, 0x3a, sub_page,
+                                        0, 0, 0, paklen, 0)
 
-        cmdout = self.fd.get_sub_page(paklen, modepageblock, 0, DEBUG)
+            cmdout = self.fd.get_sub_page(paklen, modepageblock, 0, DEBUG)
 
-        if len(cmdout) != paklen:
-            print('expected %d, got %d bytes' % (len(cmdout), paklen))
+            if len(cmdout) != paklen:
+                if DEBUG & DBG_HWDialog:
+                    print('short legacy reply, trying mode parameter header')
+                cmdout = self.__getsubpage_dbd(sub_page, paklen)
+                if cmdout is not None:
+                    self.mode_sense_style = 'dbd'
+        else:
+            cmdout = self.__getsubpage_dbd(sub_page, paklen)
+
+        if cmdout is None:
+            print('expected %d bytes for sub_page 0x%02x' % (paklen, sub_page))
             raise DroboException("cmdout is unexpected length")
 
 
@@ -476,6 +491,38 @@ class Drobo:
             print('DMIP response sub_page:0x%02x returned: %s ' %
                   (sub_page, str(result[3:])))
         return result[3:]
+
+    def __getsubpage_dbd(self, sub_page, paklen):
+        """ Retrieve a sub page using a standard MODE SENSE(10), as the Drobo S
+        Gen 2 (USB 3) expects.  Asked the legacy way, that unit returns only
+        a mode parameter header (00 06 00 00 00 00 00 00) and no page.
+
+        Here DBD (disable block descriptors, byte 1 bit 3) is set, room is left
+        for the 8 byte mode parameter header (and any block descriptors the
+        device sends anyway), the header is skipped, and the page header is
+        checked before the page is returned.
+
+        returns: the paklen bytes of the sub page, or None.
+        """
+        alloc = paklen + 8 + 16  # header + allowance for a long LBA descriptor
+        modepageblock = struct.pack(">BBBBBBBHB", 0x5a, 0x08, 0x3a, sub_page, 0,
+                                    0, 0, alloc, 0)
+        try:
+            out = self.fd.get_sub_page(alloc, modepageblock, 0, DEBUG)
+        except IOError:
+            return None
+
+        if len(out) < 8:
+            return None
+        bdl = struct.unpack('>H', out[6:8])[0]
+        page = out[8 + bdl:8 + bdl + paklen]
+
+        if (len(page) != paklen) or ((page[0] & 0x3f) != 0x3a) or \
+           (page[1] != sub_page):
+            if DEBUG & DBG_HWDialog:
+                print('DBD reply for sub_page 0x%02x not understood' % sub_page)
+            return None
+        return page
 
     def __transactionNext(self):
         """ Increment the transaction member for some modeSelect pages.

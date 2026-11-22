@@ -90,6 +90,8 @@ class FakeDevice:
             std = b'\0' * 8 + self.vendor + self.product + b'1.00'
             return std.ljust(76, b'\0')[:sz]  # Gen1 answers 76 bytes.
         if mcb[0] == 0x5a and mcb[2] == 0x3a:  # MODE SENSE(10), page 0x3A
+            if getattr(self.responder, 'wants_cdb', False):
+                return self.responder(mcb[3], mcb)[:sz]
             return self.responder(mcb[3])[:sz]
         raise IOError("FakeDevice: unexpected CDB %s" % mcb.hex())
 
@@ -184,6 +186,69 @@ class TestConstructorSanityChecks(unittest.TestCase):
         dev = FakeDevice(responder=lambda sp: b'\0\x06' + b'\0' * 6)
         with self.assertRaises(Exception):
             make_drobo(dev)
+
+
+def gen2_responder(block_descriptors=b''):
+    """ answers like the Drobo S Gen 2 over USB 3: a standard MODE SENSE(10)
+        mode parameter header in front of the page.  Asked without DBD (the
+        legacy CDB), it returns the header alone, as seen on real hardware:
+        00 06 00 00 00 00 00 00 """
+
+    def respond(sub_page, mcb):
+        if not mcb[1] & 0x08:  # DBD clear: header only, no page.
+            return b'\x00\x06' + b'\0' * 6
+        page = legacy_subpage(sub_page)
+        bdl = len(block_descriptors)
+        hdr = struct.pack('>HBBBBH', 6 + bdl + len(page), 0, 0, 0, 0, bdl)
+        return hdr + block_descriptors + page
+
+    respond.wants_cdb = True
+    return respond
+
+
+class TestGen2ModeParameterHeader(unittest.TestCase):
+    """ Drobo S Gen 2 (USB 3): page 0x3A behind a mode parameter header. """
+
+    def test_constructor_and_decoding(self):
+        d = make_drobo(FakeDevice(responder=gen2_responder()))
+        self.assertEqual(d.slot_count, SLOTS)
+        self.assertEqual(d.GetSubPageCapacity(), (1000, 2000, 3000, 400))
+        self.assertEqual(d.GetSubPageSettings(),
+                         (1220112079, 8, 'TRUSTED DATA'))
+        self.assertEqual(d.GetSubPageFirmware()[:8],
+                         (1, 201, 12942, 12, 6, 'May 13 2008', 'ArmMarvell',
+                          '1.1.2'))
+        self.assertEqual(len(d.GetSubPageSlotInfo()), SLOTS)
+
+    def test_one_dbd_query_once_detected(self):
+        """ after the first query, Gen 2 gets one DBD CDB per query. """
+        dev = FakeDevice(responder=gen2_responder())
+        d = make_drobo(dev)
+        dev.cdbs.clear()
+        d.GetSubPageCapacity()
+        self.assertEqual(len(dev.cdbs), 1)
+        cdb = dev.cdbs[0]
+        self.assertEqual(cdb[:4], bytes([0x5a, 0x08, 0x3a, 0x02]))
+        alloc = struct.unpack('>H', cdb[7:9])[0]
+        self.assertGreaterEqual(alloc, struct.calcsize('>BBHQQQQ') + 8)
+
+    def test_block_descriptors_skipped(self):
+        dev = FakeDevice(responder=gen2_responder(b'\xaa' * 8))
+        d = make_drobo(dev)
+        self.assertEqual(d.GetSubPageCapacity(), (1000, 2000, 3000, 400))
+
+    def test_wrong_page_rejected(self):
+        """ a header followed by some other page is not mis-parsed. """
+
+        def respond(sub_page, mcb):
+            if not mcb[1] & 0x08:
+                return b'\x00\x06' + b'\0' * 6
+            page = legacy_subpage(0x02 if sub_page != 0x02 else 0x05)
+            return struct.pack('>HBBBBH', 6 + len(page), 0, 0, 0, 0, 0) + page
+
+        respond.wants_cdb = True
+        with self.assertRaises(Exception):
+            make_drobo(FakeDevice(responder=respond))
 
 
 class TestDiscovery(unittest.TestCase):
