@@ -378,6 +378,7 @@ class Drobo:
         self.relayinitialcount = 0
         self.relayout_estimate = None
         self.name = ''
+        self.model = 'unknown'  # from INQUIRY, see DroboIOctl.identify_drobo
 
         # 'legacy': page 0x3A comes back raw (first generation Drobos...)
         # 'dbd': page follows a mode parameter header (Drobo S Gen 2, USB 3)
@@ -399,6 +400,8 @@ class Drobo:
             #Side effect: Config, sets self.slot_count...
 
             self.inquiry = self.inquire()
+            self.model = DroboIOctl.identify_drobo(
+                self.inquiry[8], self.inquiry[9]) or 'unknown'
 
             if DEBUG & DBG_Detection:
                 print("cfg: ", cfg)
