@@ -110,5 +110,64 @@ class TestInfoDrivesRegression(unittest.TestCase):
         self.assertEqual(row[head.index('Model'):].split()[0], 'WDC')
 
 
+class TestDriveRpmCode(unittest.TestCase):
+    """ the code is in units of 200 RPM; 1 means a non-rotating drive (SSD)
+        and 0 means the speed is unknown.
+    """
+
+    def test_spinning_speeds(self):
+        for code, want in ((27, 5400), (36, 7200), (50, 10000),
+                           (75, 15000), (2, 400), (72, 14400), (255, 51000)):
+            self.assertEqual(Drobo._driverpm(code), want, code)
+
+    def test_non_rotating(self):
+        self.assertEqual(Drobo._driverpm(1), 0)
+
+    def test_unknown(self):
+        self.assertIsNone(Drobo._driverpm(0))
+
+
+class TestSlotInfo2Rpm(unittest.TestCase):
+    """ GetSlotInfo2 adds the decoded speed as 'rpm'. """
+
+    def slots(self, *codes):
+        page = slotinfo2_page([with_rpm_code(c, i)
+                               for i, c in enumerate(codes)])
+        return make_drobo(SlotInfo2Device(page)).GetSlotInfo2()
+
+    def test_rpm_field(self):
+        s = self.slots(36, 1, 0, 27)
+        self.assertEqual([r['rpm'] for r in s], [7200, 0, None, 5400])
+
+    def test_raw_code_alongside(self):
+        s = self.slots(36)
+        self.assertEqual((s[0]['rotational_speed'], s[0]['rpm']), (36, 7200))
+
+    def test_simulation_has_rpm(self):
+        with mock.patch.object(Drobo, 'DEBUG', Drobo.DBG_Simulation):
+            s = Drobo.Drobo.GetSlotInfo2(None)
+        for r in s:
+            self.assertEqual(r['rpm'], Drobo._driverpm(r['rotational_speed']))
+
+
+class TestInfoDrivesRpm(unittest.TestCase):
+    """ 'drobom info drives' shows an RPM column. """
+
+    def test_rpm_column(self):
+        r = drobom('info', 'drives')
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        lines = [l for l in r.stdout.splitlines() if l.strip()]
+        head = [l for l in lines if l.startswith('Slot ')][0]
+        self.assertIn('RPM', head.split())
+        row = [l for l in lines if not l.startswith('Slot ')][0]
+        self.assertEqual(row[head.index('RPM') - 3:].split()[0], '14400')
+
+    def test_rpm_text(self):
+        """ the column shows the speed, '-' for non-rotating, '?' unknown. """
+        self.assertEqual(Drobo._rpmtext(7200), '7200')
+        self.assertEqual(Drobo._rpmtext(0), '-')
+        self.assertEqual(Drobo._rpmtext(None), '?')
+
+
 if __name__ == '__main__':
     unittest.main()
