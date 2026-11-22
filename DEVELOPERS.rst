@@ -133,6 +133,73 @@ confusing to use one or the other method on a system.
 (if you do distutils install, then remove the debian package via: dpkg --purge drobo-utils)
 
 
+Running the Tests
+-----------------
+
+There are regression tests in the tests/ directory.  They need no Drobo: the
+SCSI generic layer is replaced by a fake device that answers the way first 
+generation Drobos do, and drobom itself is exercised in simulation mode (-v 128)::
+
+  boule% make test
+  boule% python3 -m unittest discover -s tests -v   # same thing.
+
+Run them before and after any change to Drobo.py, DroboIOctl.py or drobom.
+Since few developers still have every model to test with, the tests are the 
+main protection against breaking older units while adding newer ones.
+
+
+Protocol Notes: Drobo S Gen 2 (USB 3)
+-------------------------------------
+
+Observed behaviour of the Drobo S Gen 2 (USB id 1a62:000a), and of the vendor's 
+own Dashboard software when it talks to one.  Useful for supporting other 
+USB 3 era units:
+
+ * INQUIRY: vendor 'USB 3.0', product 'Drobo S - Gen 2'.  The vendor's software 
+   also recognizes it by product id, not vendor.
+
+ * Sub-pages: the same MODE SENSE(10) page 0x3A sub-pages as earlier units, but:
+
+   - the vendor's software always sets DBD (byte 1 = 0x08) and allows room 
+     for a mode parameter header.  __getsubpage() tries the legacy form first 
+     (so older units see no change), then that form.
+   - observed only while the unit was rebuilding after a drive failure: both 
+     forms returned just a mode parameter header, 00 06 00 00 00 00 00 00, and 
+     no page.  The vendor's software could not see the unit at that time either, 
+     so this may be the busy state rather than the protocol.  To be confirmed on 
+     a healthy unit.
+
+ * Transport: over USB (and FireWire, Thunderbolt) the vendor's software uses 
+   ordinary SCSI pass-through, like drobo-utils.  Only for eSATA (device path 
+   containing 'esata') does it tunnel requests through reads and writes of the 
+   disk itself.
+
+ * Do NOT send, even though it looks like a read: MODE SENSE page 0x3A, 
+   sub-page 0xE1 or 0xE2, with a slot number in byte 4.  The vendor's software 
+   uses it to prepare a drive bay for removal.
+
+ * Opcode 0xEA (already used here for blink/standby) is the vendor unique 
+   channel.  The vendor's software also uses it for firmware download, 
+   diagnostics, the user event log, standby and power off.  Treat any new 
+   0xEA operation as dangerous until proven to be a pure read.
+
+ * Status: the vendor's software reads, besides the status bits and relay out 
+   count of sub-page 0x09, a disk pack status and a 'double degraded' count, 
+   and treats status as 64 bits wide.  Not yet decoded here.
+
+ * Relay out (data protection) time left is not reported by the unit.  It is 
+   estimated from how fast the relay out count falls since the relay out was 
+   first seen (GetSubPageStatus, GetRelayoutEstimate.)  That starting point is 
+   saved under $DROBO_UTILS_STATE_DIR / $XDG_STATE_HOME/drobo-utils so separate 
+   drobom runs share it; when running drobom in a container, mount that directory.
+
+ * USB transfer size: the vendor's software caps USB transfers at 512 KiB 
+   for several older Drobo USB ids.  Linux uses 1 MiB on SuperSpeed by default; 
+   on one Gen 2 the reads that timed out (while a drive was failing) were all 
+   1 MiB.  If a unit shows repeated 'reset SuperSpeed USB device' messages, try:
+   echo 1024 > /sys/block/sdX/device/max_sectors
+
+
 Making a Release
 ----------------
 

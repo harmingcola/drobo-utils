@@ -63,6 +63,9 @@ physical channel is below:
 | Drobo  | full | ?    |  n/a    |   n/a     | data  |   8     |
 |   S    | (15) | (?)  |  (0)    |   (?)     | (0)   |         |
 +--------+------+------+---------+-----------+-------+---------+
+| Drobo  | full?| n/a  |  n/a    |   n/a     | data  |  16?    |
+| S Gen2 | (?)  | (0)  |  (0)    |   (0)     | (0)   |         |
++--------+------+------+---------+-----------+-------+---------+
 | Drobo  | n/a  | n/a  |  data   |   n/a     | n/a   |   2?    |
 |   FS   | (15) | (?)  |  (0)    |   (?)     | (0)   |         |
 +--------+------+------+---------+-----------+-------+---------+
@@ -79,6 +82,9 @@ physical channel is below:
        the iSCSI subsystem to obtain a /dev/sdX file.  see `iSCSI Setup`_ for 
        details on that initial configuration.  After that point, Drobo-utils 
        will function properly over iSCSI.
+  S Gen2 - the USB 3.0 Drobo S.  It reports vendor 'USB 3.0', and is found by
+       its product id ('Drobo S - Gen 2').  Status queries are not yet confirmed 
+       on a healthy unit (see DEVELOPERS.rst.)
 
 
 .. [#GenSCSI] Linux drivers make disk, cdrom, and other peripherals, look
@@ -1009,6 +1015,15 @@ changed the protocol, so that it is completely differently done internally... Th
 generic SCSI packets inside USB.   The new protocol is SATA based, and emulates SATA in USB.
 The original SCSI protocol support was built with help from Drobo.com, but the for new protocol,
 the vendor never published the format, so it would require full-on reverse engineering to get it to work.
+ 
+Update: the vendor's own software talks to USB 3 units such as the Drobo S Gen 2 
+with the original page 0x3A queries over ordinary SCSI pass-through; it uses the 
+SATA based tunnel only for eSATA connections.  The Gen 2 reports vendor 'USB 3.0' 
+(older releases need ``drobom -s "USB 3.0" ...`` to find it.)  So far it has only 
+been tried while rebuilding after a drive failure, when it returned just a mode 
+parameter header and no page (the vendor's software could not see it then either.)  
+Full support is not yet confirmed.  See "Protocol Notes: Drobo S Gen 2" in 
+DEVELOPERS.rst.
  
 Is it Still Supported ?
 =======================

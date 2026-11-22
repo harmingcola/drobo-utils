@@ -32,6 +32,7 @@ import zipfile, zlib
 
 #only for simulation mode...
 import random
+import json
 
 # maximum transaction ID before wrapping...
 MAX_TRANSACTION = 250
@@ -101,6 +102,30 @@ def _ledstatus(n):
     if (n == 0x80):  # empty
         return 'gray'
     return colourstats[n & 0x0f]
+
+
+def _timeleft(minutes):
+    """ format an estimate of the minutes left, the way Drobo Dashboard does:
+        whole hours once an hour or more is left, otherwise whole minutes,
+        never less than one minute.
+    """
+    minutes = max(1, int(minutes + 0.5))
+    if minutes >= 60:
+        n, unit = (minutes + 30) // 60, 'hour'
+    else:
+        n, unit = minutes, 'minute'
+    return 'about %d %s%s left ' % (n, unit, '' if n == 1 else 's')
+
+
+def _completion(eta):
+    """ format the estimated completion time (seconds since the epoch) in local
+        time: 'done around 15:26 ', or with the weekday if not today.
+    """
+    when = time.localtime(eta)
+    today = time.localtime(time.time())
+    if time.strftime('%Y%m%d', when) == time.strftime('%Y%m%d', today):
+        return time.strftime('done around %H:%M ', when)
+    return time.strftime('done around %a %H:%M ', when)
 
 
 def _unitstatus(n):
@@ -288,6 +313,13 @@ class Drobo:
         self.transactionID = random.randint(1, MAX_TRANSACTION)
 
         self.relaystart = 0
+        self.relayinitialcount = 0
+        self.relayout_estimate = None
+        self.name = ''
+
+        # 'legacy': page 0x3A comes back raw (first generation Drobos...)
+        # 'dbd': page follows a mode parameter header (Drobo S Gen 2, USB 3)
+        self.mode_sense_style = 'legacy'
 
         if DEBUG & DBG_Simulation:
             self.GetSubPageFirmware() \
@@ -323,6 +355,7 @@ class Drobo:
                 raise DroboException  # Assert: All Drobo have 4 slots.
 
             set = self.GetSubPageSettings()
+            self.name = set[2]
             if DEBUG & DBG_Detection:
                 print("settings: ", set)
 
@@ -456,13 +489,24 @@ class Drobo:
             print('DMIP sub_page query:0x%02x pattern: %s ' %
                   (sub_page, mypack))
 
-        modepageblock = struct.pack(">BBBBBBBHB", 0x5a, 0, 0x3a, sub_page, 0,
-                                    0, 0, paklen, 0)
+        cmdout = None
+        if self.mode_sense_style == 'legacy':
+            modepageblock = struct.pack(">BBBBBBBHB", 0x5a, 0, 0x3a, sub_page,
+                                        0, 0, 0, paklen, 0)
 
-        cmdout = self.fd.get_sub_page(paklen, modepageblock, 0, DEBUG)
+            cmdout = self.fd.get_sub_page(paklen, modepageblock, 0, DEBUG)
 
-        if len(cmdout) != paklen:
-            print('expected %d, got %d bytes' % (len(cmdout), paklen))
+            if len(cmdout) != paklen:
+                if DEBUG & DBG_HWDialog:
+                    print('short legacy reply, trying mode parameter header')
+                cmdout = self.__getsubpage_dbd(sub_page, paklen)
+                if cmdout is not None:
+                    self.mode_sense_style = 'dbd'
+        else:
+            cmdout = self.__getsubpage_dbd(sub_page, paklen)
+
+        if cmdout is None:
+            print('expected %d bytes for sub_page 0x%02x' % (paklen, sub_page))
             raise DroboException("cmdout is unexpected length")
 
 
@@ -476,6 +520,38 @@ class Drobo:
             print('DMIP response sub_page:0x%02x returned: %s ' %
                   (sub_page, str(result[3:])))
         return result[3:]
+
+    def __getsubpage_dbd(self, sub_page, paklen):
+        """ Retrieve a sub page using a standard MODE SENSE(10), as the Drobo S
+        Gen 2 (USB 3) expects.  Asked the legacy way, that unit returns only
+        a mode parameter header (00 06 00 00 00 00 00 00) and no page.
+
+        Here DBD (disable block descriptors, byte 1 bit 3) is set, room is left
+        for the 8 byte mode parameter header (and any block descriptors the
+        device sends anyway), the header is skipped, and the page header is
+        checked before the page is returned.
+
+        returns: the paklen bytes of the sub page, or None.
+        """
+        alloc = paklen + 8 + 16  # header + allowance for a long LBA descriptor
+        modepageblock = struct.pack(">BBBBBBBHB", 0x5a, 0x08, 0x3a, sub_page, 0,
+                                    0, 0, alloc, 0)
+        try:
+            out = self.fd.get_sub_page(alloc, modepageblock, 0, DEBUG)
+        except IOError:
+            return None
+
+        if len(out) < 8:
+            return None
+        bdl = struct.unpack('>H', out[6:8])[0]
+        page = out[8 + bdl:8 + bdl + paklen]
+
+        if (len(page) != paklen) or ((page[0] & 0x3f) != 0x3a) or \
+           (page[1] != sub_page):
+            if DEBUG & DBG_HWDialog:
+                print('DBD reply for sub_page 0x%02x not understood' % sub_page)
+            return None
+        return page
 
     def __transactionNext(self):
         """ Increment the transaction member for some modeSelect pages.
@@ -1302,29 +1378,119 @@ class Drobo:
         s = _unitstatus(ss[0])
 
         if ss[1] > 0:  # relay out in progress
-            if self.relaystart == 0:
-                self.relaystart = time.time()
-                self.relayinitialcount = ss[1]
+            est = self.__relayout_track(ss[1])
+            self.relayout_estimate = est
+            if est is None:
                 s.append('no estimate yet ')
+            elif est['blocks_done'] == 0:
+                s.append('gathering stats, no estimate yet ')
+                self.relayout_estimate = None
             else:
-                now = time.time()
-                runningtime = (now - self.relaystart) / 60.0
-                amtdone = self.relayinitialcount - ss[1]
-                amtleft = ss[1]
-                pctleft = 100.0 * amtleft / self.relayinitialcount
-                pctdone = 100 - pctleft
-
-                if amtdone == 0:
-                    s.append('gathering stats, no estimate yet ')
-                else:
-                    rate = pctdone / runningtime
-                    timeleft = pctleft * rate  # timeleft in minutes...
-                    s.append('%d blocks left ' % ss[1])
+                s.append('%d blocks left ' % ss[1])
+                s.append(_timeleft(est['minutes_left']))
+                s.append(_completion(est['eta']))
         else:
-            if self.relaystart > 0:
-                self.relaystart == 0
+            self.relayout_estimate = None
+            self.__relayout_clear()
 
         return (s, ss[1])
+
+    def GetRelayoutEstimate(self):
+        """ query the unit, and if data protection (relay out) is running and
+        enough progress has been seen, return a dictionary:
+
+          blocks_left, blocks_done, percent_done, minutes_left, eta, started
+
+        eta and started are seconds since the epoch.  Returns None when no
+        relay out is running, or there is no estimate yet.
+
+        The unit only reports how much work is left (the relay out count), so
+        the estimate comes from how fast that count falls.  The starting
+        point is saved (see __relayout_state_file) so that one shot commands
+        like 'drobom status' produce an estimate from the second run on.
+        """
+        if DEBUG & DBG_Simulation:
+            return None
+        self.GetSubPageStatus()
+        return self.relayout_estimate
+
+    def __relayout_state_file(self):
+        """ where the relay out starting point is kept between runs:
+        $DROBO_UTILS_STATE_DIR, else $XDG_STATE_HOME/drobo-utils, else
+        ~/.local/state/drobo-utils.  One file per unit, named after it.
+        """
+        d = os.environ.get('DROBO_UTILS_STATE_DIR')
+        if not d:
+            base = os.environ.get('XDG_STATE_HOME') or \
+                   os.path.join(os.path.expanduser('~'), '.local', 'state')
+            d = os.path.join(base, 'drobo-utils')
+        name = re.sub(r'[^A-Za-z0-9_.-]', '_', self.name or 'drobo')
+        return os.path.join(d, 'relayout-%s.json' % name)
+
+    def __relayout_load(self):
+        """ starting point from memory, or else from the state file. """
+        if self.relaystart > 0:
+            return (self.relaystart, self.relayinitialcount)
+        try:
+            with open(self.__relayout_state_file()) as f:
+                st = json.load(f)
+            return (float(st['start']), int(st['count']))
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+
+    def __relayout_save(self, start, count):
+        self.relaystart = start
+        self.relayinitialcount = count
+        f = self.__relayout_state_file()
+        try:
+            os.makedirs(os.path.dirname(f), exist_ok=True)
+            tmp = f + '.tmp'
+            with open(tmp, 'w') as fd:
+                json.dump({'start': start, 'count': count}, fd)
+            os.replace(tmp, f)
+        except OSError:
+            if DEBUG & DBG_General:
+                print('cannot save relay out state to %s' % f)
+
+    def __relayout_clear(self):
+        self.relaystart = 0
+        self.relayinitialcount = 0
+        try:
+            os.remove(self.__relayout_state_file())
+        except OSError:
+            pass
+
+    def __relayout_track(self, count):
+        """ update relay out tracking with the current count (blocks left.)
+        returns None on the first reading (or after a restart), else a dict
+        as described in GetRelayoutEstimate.
+        """
+        now = time.time()
+        st = self.__relayout_load()
+        if (st is None) or (count > st[1]):
+            # first reading, or more work than when we started: start over.
+            self.__relayout_save(now, count)
+            return None
+
+        start, initial = st
+        self.relaystart, self.relayinitialcount = start, initial
+        done = initial - count
+        est = {
+            'blocks_left': count,
+            'blocks_done': done,
+            'percent_done': 100.0 * done / initial,
+            'minutes_left': None,
+            'eta': None,
+            'started': start
+        }
+        runningtime = (now - start) / 60.0
+        if done > 0 and runningtime > 0:
+            rate = est['percent_done'] / runningtime  # percent per minute
+            est['minutes_left'] = (100.0 - est['percent_done']) / rate
+            est['eta'] = now + est['minutes_left'] * 60
+        else:
+            est['blocks_done'] = 0
+        return est
 
     def GetOptions(self):
         """

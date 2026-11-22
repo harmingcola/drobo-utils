@@ -10,3 +10,6 @@ debian/drobo-utils.substvars
 debian/drobo-utils/
 debian/files
 debian/.debhelper/
+
+# local planning notes, not part of the package
+plans/
