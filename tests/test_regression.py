@@ -105,6 +105,8 @@ class FakeDevice:
         if mcb[0] == 0x12:  # INQUIRY: 8 bytes, vendor, product, revision, ...
             std = b'\0' * 8 + self.vendor + self.product + b'1.00'
             return std.ljust(76, b'\0')[:sz]  # Gen1 answers 76 bytes.
+        if mcb[0] == 0xea and getattr(self, 'ea_responder', None):
+            return self.ea_responder(bytes(mcb), sz, out)
         if mcb[0] == 0x5a and mcb[2] == 0x3a:  # MODE SENSE(10), page 0x3A
             if getattr(self.responder, 'wants_cdb', False):
                 return self.responder(mcb[3], mcb)[:sz]
@@ -587,6 +589,115 @@ class TestSlotInfo2(unittest.TestCase):
         self.assertEqual(len(s), 5)
 
 
+class TestVendorCommands(unittest.TestCase):
+    """ the 0xEA vendor unique commands drobo-utils already sends. """
+
+    def test_blink_cdb_is_unchanged(self):
+        dev = FakeDevice()
+        dev.ea_responder = lambda mcb, sz, out: b'\0' * sz
+        d = make_drobo(dev)
+        txid = d.transactionID
+        dev.cdbs.clear()
+        d.Blink()
+        self.assertEqual(dev.cdbs, [
+            struct.pack('>BBBBBBBHB', 0xea, 0x10, 0x00, 0x06, 0x00, txid,
+                        0x20, 0x01, 0x00)
+        ])
+
+
+def lunex_entry(index, name=b'drobo', total=17592186044416, second=4398046511104,
+                fmt=0x08, lun=None):
+    """ one 285 byte extended LUN info entry (big endian.) """
+    e = struct.pack('>BL258sBBQQL', index, index if lun is None else lun, name,
+                    0, 1, total, second, fmt)
+    assert len(e) == 285
+    return e
+
+
+def lunex_reply(entries, more=False):
+    return struct.pack('BBB', 0, len(entries), 1 if more else 0) + b''.join(
+        entries)
+
+
+class LUNExDevice(FakeDevice):
+    """ legacy Drobo answering the extended LUN info system operation
+        (0xEA, read, op 0x81), paged a few entries per reply. """
+
+    def __init__(self, luns, per_reply=3, supported=True, always_more=False):
+        super().__init__()
+        self.luns = luns
+        self.per_reply = per_reply
+        self.supported = supported
+        self.always_more = always_more
+        self.ea_responder = self.respond_ea
+
+    def respond_ea(self, mcb, sz, out):
+        if not self.supported:
+            raise IOError("io_hdr status is: 2")
+        start = mcb[4]
+        rest = [e for e in self.luns if e[0] >= start]
+        page = rest[:self.per_reply]
+        more = self.always_more or len(rest) > self.per_reply
+        return lunex_reply(page, more)[:sz]
+
+
+class TestLUNsInfoEx(unittest.TestCase):
+    """ GetLUNsInfoEx: extended LUN info via a read system operation. """
+
+    def test_fields(self):
+        d = make_drobo(LUNExDevice([lunex_entry(0, name=b'Volume 1')]))
+        l = d.GetLUNsInfoEx()
+        self.assertEqual(len(l), 1)
+        self.assertEqual(l[0]['index'], 0)
+        self.assertEqual(l[0]['name'], 'Volume 1')
+        self.assertEqual(l[0]['total_capacity'], 17592186044416)
+        self.assertEqual(l[0]['second_capacity'], 4398046511104)
+        self.assertEqual(l[0]['format'], 0x08)
+        self.assertEqual(l[0]['format_name'], Drobo._partformat(0x08))
+
+    def test_exact_cdb(self):
+        """ byte for byte what the vendor's software sends: a read (0x80)
+            system operation 0x81 from LUN 0, 1024 bytes. """
+        dev = LUNExDevice([lunex_entry(0)])
+        d = make_drobo(dev)
+        dev.cdbs.clear()
+        d.GetLUNsInfoEx()
+        self.assertEqual(dev.cdbs, [
+            struct.pack('>BBBBBBBHB', 0xea, 0x10, 0x80, 0x81, 0, 0, 0x21,
+                        1024, 0)
+        ])
+
+    def test_paging(self):
+        dev = LUNExDevice([lunex_entry(i) for i in range(7)], per_reply=3)
+        d = make_drobo(dev)
+        dev.cdbs.clear()
+        l = d.GetLUNsInfoEx()
+        self.assertEqual([e['index'] for e in l], list(range(7)))
+        self.assertEqual([c[4] for c in dev.cdbs], [0, 3, 6])
+
+    def test_paging_is_bounded(self):
+        dev = LUNExDevice([lunex_entry(0)], always_more=True)
+        d = make_drobo(dev)
+        dev.cdbs.clear()
+        d.GetLUNsInfoEx()
+        self.assertLessEqual(len(dev.cdbs), 32)
+
+    def test_unsupported_firmware_returns_none(self):
+        d = make_drobo(LUNExDevice([], supported=False))
+        self.assertIsNone(d.GetLUNsInfoEx())
+
+    def test_only_allowed_system_operations(self):
+        """ the read helper must refuse any other operation: others include
+            firmware, standby and power off. """
+        dev = LUNExDevice([lunex_entry(0)])
+        d = make_drobo(dev)
+        dev.cdbs.clear()
+        for op in (0x00, 0x06, 0x0d, 0x80, 0x82, 0xff):
+            with self.assertRaises(Drobo.DroboException):
+                d._Drobo__system_read(op, 0, 1024)
+        self.assertEqual(dev.cdbs, [])
+
+
 class TestConstructorSanityChecks(unittest.TestCase):
 
     def test_rejects_too_few_slots(self):
@@ -750,6 +861,15 @@ class TestSimulationMode(unittest.TestCase):
         r = self.drobom('status')
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn('TRUSTED DATA', r.stdout)
+
+    def test_info_volumes(self):
+        r = self.drobom('info', 'volumes')
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertIn('Name', r.stdout)
+
+    def test_info_luns(self):
+        r = self.drobom('info', 'luns')
+        self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_info_slots(self):
         r = self.drobom('info', 'slots')
