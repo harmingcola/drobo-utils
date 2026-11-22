@@ -20,6 +20,15 @@ These are all Open Tasks... HELP WANTED!
             -- preserve option settings across reboot? (one report.)
             -- periodically synch. the drobo clock to the server.
   
+unreleased
+----------
+
+  * Drobo S Gen 2 (USB 3): found by INQUIRY product id (vendor is 'USB 3.0'.)
+  * Drobo S Gen 2: read sub-pages that follow a mode parameter header (DBD).
+  * fix relay out time estimate (was inverted, never shown, never reset.)
+  * add hardware-free regression tests (make test.)
+  * DEVELOPERS: protocol notes for the Drobo S Gen 2.
+
 0.6.2.2: 2010/02/06
 -------------------
 

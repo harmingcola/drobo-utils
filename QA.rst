@@ -44,4 +44,13 @@ QA Test checklist prior to release:
      drobom set name 
      drobom info...
 
+   2.5 make test  # regression tests, no hardware needed.
+
+   2.6 Drobo S Gen 2 (USB 3), read-only checks only:
+     2.6.1 drobom -v 16 list   # found without -s
+     2.6.2 drobom -v 2 status  # second CDB byte is 0x08 (DBD) once detected
+     2.6.3 drobom info config,capacity,slots,firmware,settings,luns,protocol
+     2.6.4 compare with the vendor's Dashboard (firmware, drive sizes per slot.)
+     2.6.5 do NOT run fwload, fwupgrade, format or set lunsize on this model yet.
+
    3.0 Re-build packages with final release id.

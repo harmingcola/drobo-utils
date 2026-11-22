@@ -63,6 +63,9 @@ physical channel is below:
 | Drobo  | full | ?    |  n/a    |   n/a     | data  |   8     |
 |   S    | (15) | (?)  |  (0)    |   (?)     | (0)   |         |
 +--------+------+------+---------+-----------+-------+---------+
+| Drobo  | full?| n/a  |  n/a    |   n/a     | data  |  16?    |
+| S Gen2 | (?)  | (0)  |  (0)    |   (0)     | (0)   |         |
++--------+------+------+---------+-----------+-------+---------+
 | Drobo  | n/a  | n/a  |  data   |   n/a     | n/a   |   2?    |
 |   FS   | (15) | (?)  |  (0)    |   (?)     | (0)   |         |
 +--------+------+------+---------+-----------+-------+---------+
@@ -79,6 +82,9 @@ physical channel is below:
        the iSCSI subsystem to obtain a /dev/sdX file.  see `iSCSI Setup`_ for 
        details on that initial configuration.  After that point, Drobo-utils 
        will function properly over iSCSI.
+  S Gen2 - the USB 3.0 Drobo S.  It reports vendor 'USB 3.0', and is found by
+       its product id ('Drobo S - Gen 2').  Its status pages are read with a 
+       standard MODE SENSE (see DEVELOPERS.rst.)  Not yet confirmed on hardware.
 
 
 .. [#GenSCSI] Linux drivers make disk, cdrom, and other peripherals, look
@@ -1009,6 +1015,13 @@ changed the protocol, so that it is completely differently done internally... Th
 generic SCSI packets inside USB.   The new protocol is SATA based, and emulates SATA in USB.
 The original SCSI protocol support was built with help from Drobo.com, but the for new protocol,
 the vendor never published the format, so it would require full-on reverse engineering to get it to work.
+ 
+Update: at least the Drobo S Gen 2 over USB 3 still answers the original page 0x3A 
+queries over generic SCSI.  It reports vendor 'USB 3.0' (older releases need 
+``drobom -s "USB 3.0" ...`` to find it), and puts a standard mode parameter header 
+in front of each page, which drobo-utils now handles.  The SATA based protocol 
+appears to be used for eSATA, which remains data only.  See "Protocol Notes: 
+Drobo S Gen 2" in DEVELOPERS.rst.
  
 Is it Still Supported ?
 =======================

@@ -148,6 +148,48 @@ Since few developers still have every model to test with, the tests are the
 main protection against breaking older units while adding newer ones.
 
 
+Protocol Notes: Drobo S Gen 2 (USB 3)
+-------------------------------------
+
+Observed behaviour of the Drobo S Gen 2 (USB id 1a62:000a), and of the vendor's 
+own Dashboard software when it talks to one.  Useful for supporting other 
+USB 3 era units:
+
+ * INQUIRY: vendor 'USB 3.0', product 'Drobo S - Gen 2'.  The vendor's software 
+   also recognizes it by product id, not vendor.
+
+ * Sub-pages: the same MODE SENSE(10) page 0x3A sub-pages as earlier units, but:
+
+   - asked the legacy way (byte 1 = 0, DBD clear) the unit returns only a mode 
+     parameter header, 00 06 00 00 00 00 00 00, and no page.
+   - asked with DBD set (byte 1 = 0x08) and room for the header, the 8 byte 
+     mode parameter header is followed by the sub-page.  The vendor's software 
+     always sets DBD.
+   - __getsubpage() tries the legacy form first, so older units see no change.
+
+ * Do NOT send, even though it looks like a read: MODE SENSE page 0x3A, 
+   sub-page 0xE1 or 0xE2, with a slot number in byte 4.  The vendor's software 
+   uses it to prepare a drive bay for removal.
+
+ * Opcode 0xEA (already used here for blink/standby) is the vendor unique 
+   channel.  The vendor's software also uses it for firmware download, 
+   diagnostics, the user event log, standby and power off.  Treat any new 
+   0xEA operation as dangerous until proven to be a pure read.
+
+ * Status: the vendor's software reads, besides the status bits and relay out 
+   count of sub-page 0x09, a disk pack status and a 'double degraded' count, 
+   and treats status as 64 bits wide.  Not yet decoded here.
+
+ * Relay out (data protection) time left is not reported by the unit.  It is 
+   estimated from how fast the relay out count falls (GetSubPageStatus.)
+
+ * USB transfer size: the vendor's software caps USB transfers at 512 KiB 
+   for several older Drobo USB ids.  Linux uses 1 MiB on SuperSpeed by default; 
+   on one Gen 2 the reads that timed out (while a drive was failing) were all 
+   1 MiB.  If a unit shows repeated 'reset SuperSpeed USB device' messages, try:
+   echo 1024 > /sys/block/sdX/device/max_sectors
+
+
 Making a Release
 ----------------
 
