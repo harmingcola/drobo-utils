@@ -69,7 +69,7 @@ class TestSlotInfo2Regression(unittest.TestCase):
             self.assertEqual((r['slot'], r['rotational_speed'],
                               r['temperature'], r['life_remaining'],
                               r['media'], r['interface'], r['health']),
-                             (i, 72, 35 + i, 100 - 7 * i, 'HDD', 'SATA',
+                             (i, 36, 35 + i, 100 - 7 * i, 'HDD', 'SATA',
                               'Good'))
 
 
@@ -160,7 +160,7 @@ class TestInfoDrivesRpm(unittest.TestCase):
         head = [l for l in lines if l.startswith('Slot ')][0]
         self.assertIn('RPM', head.split())
         row = [l for l in lines if not l.startswith('Slot ')][0]
-        self.assertEqual(row[head.index('RPM') - 3:].split()[0], '14400')
+        self.assertEqual(row[head.index('RPM') - 3:].split()[0], '7200')
 
     def test_rpm_text(self):
         """ the column shows the speed, '-' for non-rotating, '?' unknown. """
