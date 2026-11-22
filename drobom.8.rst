@@ -55,7 +55,7 @@ Command is one of:
 * *help*
   print this text
 * *info*  <toprint>
-  print information on a Drobo. The <toprint> argument is a comma separated list of the values below (default is to print all of them): config, capacity, protocol, settings, slots, firmware, status, options, luns, scsi, health (redundancy, extended status, data protection progress)
+  print information on a Drobo. The <toprint> argument is a comma separated list of the values below (default is to print all of them): config, capacity, protocol, settings, slots, firmware, status, options, luns, scsi, health (redundancy, extended status, data protection progress), drives (per drive temperature, life remaining, errors, model, serial; newer firmware)
 * *list*
   show device files for all Drobos found.
 * *set \<options\> \<value\>*

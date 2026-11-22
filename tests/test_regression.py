@@ -437,6 +437,135 @@ class TestStatusEx(unittest.TestCase):
         self.assertEqual(d.GetSubPageStatus(), (['No redundancy'], 0))
 
 
+class TestUnitStatusNames(unittest.TestCase):
+    """ names of the status bits drobo-utils has always known. """
+
+    KNOWN = [(0x0002, 'Red alert'), (0x0004, 'Yellow alert'),
+             (0x0008, 'No disks'), (0x0010, 'Bad disk'),
+             (0x0020, 'Too many missing disks'), (0x0040, 'No redundancy'),
+             (0x0080, 'No magic hotspare'), (0x0100, 'no space left'),
+             (0x0200, 'Relay out in progress'),
+             (0x0400, 'Format in progress'), (0x0800, 'Mismatched disks'),
+             (0x1000, 'Unknown version'),
+             (0x2000, 'New firmware installed'),
+             (0x4000, 'New LUN available after reboot'),
+             (0x10000000, 'Unknown error')]
+
+    def test_known_bits(self):
+        for bit, name in self.KNOWN:
+            self.assertEqual(Drobo._unitstatus(bit), [name], hex(bit))
+
+    def test_combined_order(self):
+        self.assertEqual(Drobo._unitstatus(0x0242),
+                         ['Red alert', 'No redundancy',
+                          'Relay out in progress'])
+
+    def test_healthy(self):
+        self.assertEqual(Drobo._unitstatus(0), [])
+
+    def test_newer_bits(self):
+        """ bits named by newer firmware / the vendor's software. """
+        for bit, name in ((0x40000, 'Incompatible disk pack'),
+                          (0x100000, 'Power supply missing'),
+                          (0x200000, 'Fan partially failed'),
+                          (0x400000, 'Fan failed'),
+                          (0x800000, 'Fan missing')):
+            self.assertEqual(Drobo._unitstatus(bit), [name], hex(bit))
+
+    def test_diskpack_status_8_is_incompatible(self):
+        d = make_drobo(StatusDevice(0, 0, 8))
+        self.assertIn('Incompatible disk pack', d.GetStatusEx()['flags'])
+
+
+def slot_record2(slot, life=97, temp=38, errors=0, maker=b'WDC',
+                 fw=b'82.00A82', serial=b'WD-WCC4N1234567', total=3000592982016,
+                 managed=2999000000000, stride=108):
+    """ one sub-page 0x35 per-drive record (108 bytes, big endian.) """
+    rec = struct.pack('>BBHLBBBB44s12s24sQQ', slot, 1, errors, 2, 1, temp,
+                      life, 72, maker, fw, serial, total, managed)
+    assert len(rec) == 108
+    return rec.ljust(stride, b'\0')
+
+
+def slotinfo2_page(records, stride=108):
+    body = struct.pack('>LBBH', 0, len(records), stride, 0) + b''.join(records)
+    return struct.pack('>BBH', 0x7a, 0x35, len(body)) + body
+
+
+class SlotInfo2Device(FakeDevice):
+
+    def __init__(self, page=None, gen2=False):
+        self.page = page
+        if gen2:
+            inner = gen2_responder()
+
+            def respond(sub_page, mcb):
+                if sub_page == 0x35 and mcb[1] & 0x08:
+                    return struct.pack('>HBBBBH', 6 + len(self.page), 0, 0, 0,
+                                       0, 0) + self.page
+                if sub_page == 0x35:
+                    return b'\x00\x06' + b'\0' * 6
+                return inner(sub_page, mcb)
+
+            respond.wants_cdb = True
+            super().__init__(responder=respond)
+        else:
+            super().__init__(responder=self.respond)
+
+    def respond(self, sub_page):
+        if sub_page == 0x35:
+            if self.page is None:
+                raise IOError("io_hdr status is: 2")  # unsupported page
+            return self.page
+        return legacy_subpage(sub_page)
+
+
+class TestSlotInfo2(unittest.TestCase):
+    """ GetSlotInfo2: per-drive health from sub-page 0x35. """
+
+    def test_fields(self):
+        page = slotinfo2_page([slot_record2(0, errors=3),
+                               slot_record2(1, life=12, temp=51)])
+        d = make_drobo(SlotInfo2Device(page))
+        s = d.GetSlotInfo2()
+        self.assertEqual(len(s), 2)
+        self.assertEqual(s[0]['slot'], 0)
+        self.assertEqual(s[0]['errors'], 3)
+        self.assertEqual(s[0]['manufacturer'], 'WDC')
+        self.assertEqual(s[0]['firmware'], '82.00A82')
+        self.assertEqual(s[0]['serial'], 'WD-WCC4N1234567')
+        self.assertEqual(s[0]['total_capacity'], 3000592982016)
+        self.assertEqual(s[0]['managed_capacity'], 2999000000000)
+        self.assertEqual((s[1]['life_remaining'], s[1]['temperature']),
+                         (12, 51))
+        self.assertEqual(s[1]['rotational_speed'], 72)
+        self.assertEqual((s[1]['status'], s[1]['disk_state'],
+                          s[1]['disk_type']), (1, 2, 1))
+
+    def test_record_stride_from_header(self):
+        page = slotinfo2_page(
+            [slot_record2(i, stride=112) for i in range(3)], stride=112)
+        s = make_drobo(SlotInfo2Device(page)).GetSlotInfo2()
+        self.assertEqual([r['slot'] for r in s], [0, 1, 2])
+        self.assertEqual(s[2]['serial'], 'WD-WCC4N1234567')
+
+    def test_full_width_text_is_safe(self):
+        page = slotinfo2_page([slot_record2(0, maker=b'M' * 44,
+                                            serial=b'S' * 24)])
+        s = make_drobo(SlotInfo2Device(page)).GetSlotInfo2()
+        self.assertTrue(s[0]['manufacturer'].startswith('MMMM'))
+        self.assertTrue(s[0]['serial'].startswith('SSSS'))
+
+    def test_unsupported_firmware_returns_none(self):
+        d = make_drobo(SlotInfo2Device(None))
+        self.assertIsNone(d.GetSlotInfo2())
+
+    def test_gen2(self):
+        page = slotinfo2_page([slot_record2(i) for i in range(5)])
+        s = make_drobo(SlotInfo2Device(page, gen2=True)).GetSlotInfo2()
+        self.assertEqual(len(s), 5)
+
+
 class TestConstructorSanityChecks(unittest.TestCase):
 
     def test_rejects_too_few_slots(self):
@@ -600,6 +729,16 @@ class TestSimulationMode(unittest.TestCase):
         r = self.drobom('status')
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn('TRUSTED DATA', r.stdout)
+
+    def test_info_slots(self):
+        r = self.drobom('info', 'slots')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('ST3500830AS', r.stdout)
+
+    def test_info_drives(self):
+        r = self.drobom('info', 'drives')
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertIn('Life', r.stdout)
 
     def test_info_health(self):
         r = self.drobom('info', 'health')

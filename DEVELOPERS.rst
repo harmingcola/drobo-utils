@@ -182,13 +182,23 @@ USB 3 era units:
    further value of unknown meaning (24 bytes.)  Older firmware returns the 
    12 byte form.  GetStatusEx() reads whatever the unit returns.  The vendor's 
    software folds disk pack status into the status bits: 2 -> 0x1000, 
-   3 -> 0x10000000, 4 -> 0x800, 5..7 -> 0x20, 8 -> 0x40000.  It also treats 
-   status as 64 bits wide; the meaning of most bits above 0x4000 is unknown.
+   3 -> 0x10000000, 4 -> 0x800, 5..7 -> 0x20, 8 -> 0x40000.  Newer bits: 
+   0x40000 incompatible disk pack, 0x100000 power supply missing, 0x200000 
+   fan partially failed, 0x400000 fan failed, 0x800000 fan missing.  The 
+   vendor's software treats status as 64 bits wide; above bit 31 it knows 
+   incompatible Drobo on DroboShare (32), volume usage over limit (36, all 
+   volumes 37) and iSCSI target login failed (38).  Where those high bits 
+   come from (perhaps the 24 byte record's extra value) is unconfirmed.
+
+ * Sub-page 0x35, slot info 2 (GetSlotInfo2): page header, 4 reserved bytes, 
+   slot count (byte 8), record length (byte 9), 2 reserved, then per slot 
+   (at least 108 bytes, big endian): slot, status, error count (u16), disk 
+   state (u32), disk type, temperature, life remaining, rotational speed, 
+   manufacturer (44), firmware revision (12), serial (24), total and managed 
+   capacity (u64 each.)
 
  * Other sub-pages the vendor's software reads, not yet used here: 0x11 disk 
-   pack info, 0x33 system info, 0x35 slot info 2 (per drive: error count, 
-   disk state, type, temperature, life remaining, rotational speed, maker, 
-   firmware revision, serial, capacities), 0x37 fans, 0x3A battery.
+   pack info, 0x33 system info, 0x37 fans, 0x3A battery.
 
  * Relay out (data protection) time left is not reported by the unit.  It is 
    estimated from how fast the relay out count falls since the relay out was 

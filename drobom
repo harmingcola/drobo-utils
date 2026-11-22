@@ -18,7 +18,7 @@ import textwrap
 import subprocess
 
 valid_print = ("config", "capacity", "protocol", "scsi", "slots", "firmware",
-               "status", "options", "luns", "health")
+               "status", "options", "luns", "health", "drives")
 
 opt_str = ', '.join(valid_print)
 
@@ -186,6 +186,22 @@ def printscsi(d):
               ( c, host, channel, id, lun, vendor, version ))
         else:
             print(str((c, host, channel, id, lun, vendor, version)))
+
+
+def printdrives(d):
+    slots = d.GetSlotInfo2()
+    if slots is None:
+        print('per-drive details are not supported by this firmware')
+        return
+    print('Slot  Size(GB)  Temp(C)  Life(%)  Errors  Model                    Firmware  Serial')
+    for r in slots:
+        if not r['total_capacity']:
+            print('%4d  empty' % r['slot'])
+            continue
+        print('%4d %9d %8d %8d %7d  %-24s %-9s %s' % \
+              (r['slot'], togig(r['total_capacity']), r['temperature'],
+               r['life_remaining'], r['errors'], r['manufacturer'][:24],
+               r['firmware'][:9], r['serial']))
 
 
 def printhealth(d):

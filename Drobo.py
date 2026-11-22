@@ -183,6 +183,17 @@ def _unitstatus(n):
         f.append('New firmware installed')
     if (n & 0x4000):
         f.append('New LUN available after reboot')
+    # named by newer firmware / the vendor's software:
+    if (n & 0x40000):
+        f.append('Incompatible disk pack')
+    if (n & 0x100000):
+        f.append('Power supply missing')
+    if (n & 0x200000):
+        f.append('Fan partially failed')
+    if (n & 0x400000):
+        f.append('Fan failed')
+    if (n & 0x800000):
+        f.append('Fan missing')
     if (n & 0x10000000
         ):  # was going to say 'Let us pray...', but no need to alarm people.
         f.append('Unknown error')
@@ -1476,6 +1487,64 @@ class Drobo:
         return {'status': status, 'flags': _unitstatus(status | implied),
                 'relayout_count': relayout, 'diskpack_status': diskpack,
                 'double_degraded': dd, 'extra': extra}
+
+    def GetSlotInfo2(self):
+        """ per-drive details, from sub-page 0x35 (newer firmware.)  returns a
+        list of dictionaries, one per slot:
+
+          slot, status, errors, disk_state, disk_type, temperature,
+          life_remaining, rotational_speed, manufacturer, firmware, serial,
+          total_capacity, managed_capacity
+
+        or None when the firmware does not support the sub-page.
+
+        Page layout (big endian): page header (4 bytes), 4 reserved bytes,
+        slot count (1), record length (1), 2 reserved, then one record per
+        slot, each at least 108 bytes:
+          slot u8, status u8, error count u16, disk state u32, disk type u8,
+          temperature u8, life remaining u8, rotational speed u8,
+          manufacturer 44s, firmware revision 12s, serial 24s,
+          total capacity u64, managed capacity u64.
+
+        STATUS: layout from observed behaviour, untested on hardware.  Units
+        are assumed: temperature in Celsius, life remaining in percent.
+        """
+        if DEBUG & DBG_Simulation:
+            return [{'slot': i, 'status': 1, 'errors': 0, 'disk_state': 2,
+                     'disk_type': 1, 'temperature': 35 + i,
+                     'life_remaining': 100 - 7 * i, 'rotational_speed': 72,
+                     'manufacturer': 'WDC WD30EFRX-68EUZN0',
+                     'firmware': '82.00A82', 'serial': 'WD-SIMULATED%d' % i,
+                     'total_capacity': 3000592982016,
+                     'managed_capacity': 2999000000000} for i in range(4)]
+
+        maxlen = 8 + 128 * max(self.slot_count, 8)  # room for padded records
+        try:
+            body = self.__getsubpage_raw(0x35, maxlen)
+        except (DroboException, IOError):
+            return None
+        if len(body) < 8:
+            return None
+        count, stride = body[4], body[5]
+        if stride < 108:
+            return None
+
+        slots = []
+        off = 8
+        for i in range(count):
+            rec = body[off:off + 108]
+            if len(rec) < 108:
+                break
+            f = struct.unpack('>BBHLBBBB44s12s24sQQ', rec)
+            text = [x.split(b'\0')[0].decode('latin-1').strip() for x in f[8:11]]
+            slots.append({'slot': f[0], 'status': f[1], 'errors': f[2],
+                          'disk_state': f[3], 'disk_type': f[4],
+                          'temperature': f[5], 'life_remaining': f[6],
+                          'rotational_speed': f[7], 'manufacturer': text[0],
+                          'firmware': text[1], 'serial': text[2],
+                          'total_capacity': f[11], 'managed_capacity': f[12]})
+            off += stride
+        return slots
 
     def GetRelayoutEstimate(self):
         """ query the unit, and if data protection (relay out) is running and
