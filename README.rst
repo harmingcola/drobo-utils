@@ -83,8 +83,8 @@ physical channel is below:
        details on that initial configuration.  After that point, Drobo-utils 
        will function properly over iSCSI.
   S Gen2 - the USB 3.0 Drobo S.  It reports vendor 'USB 3.0', and is found by
-       its product id ('Drobo S - Gen 2').  Its status pages are read with a 
-       standard MODE SENSE (see DEVELOPERS.rst.)  Not yet confirmed on hardware.
+       its product id ('Drobo S - Gen 2').  Status queries are not yet confirmed 
+       on a healthy unit (see DEVELOPERS.rst.)
 
 
 .. [#GenSCSI] Linux drivers make disk, cdrom, and other peripherals, look
@@ -1016,12 +1016,14 @@ generic SCSI packets inside USB.   The new protocol is SATA based, and emulates 
 The original SCSI protocol support was built with help from Drobo.com, but the for new protocol,
 the vendor never published the format, so it would require full-on reverse engineering to get it to work.
  
-Update: at least the Drobo S Gen 2 over USB 3 still answers the original page 0x3A 
-queries over generic SCSI.  It reports vendor 'USB 3.0' (older releases need 
-``drobom -s "USB 3.0" ...`` to find it), and puts a standard mode parameter header 
-in front of each page, which drobo-utils now handles.  The SATA based protocol 
-appears to be used for eSATA, which remains data only.  See "Protocol Notes: 
-Drobo S Gen 2" in DEVELOPERS.rst.
+Update: the vendor's own software talks to USB 3 units such as the Drobo S Gen 2 
+with the original page 0x3A queries over ordinary SCSI pass-through; it uses the 
+SATA based tunnel only for eSATA connections.  The Gen 2 reports vendor 'USB 3.0' 
+(older releases need ``drobom -s "USB 3.0" ...`` to find it.)  So far it has only 
+been tried while rebuilding after a drive failure, when it returned just a mode 
+parameter header and no page (the vendor's software could not see it then either.)  
+Full support is not yet confirmed.  See "Protocol Notes: Drobo S Gen 2" in 
+DEVELOPERS.rst.
  
 Is it Still Supported ?
 =======================

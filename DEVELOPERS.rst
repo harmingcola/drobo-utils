@@ -160,12 +160,19 @@ USB 3 era units:
 
  * Sub-pages: the same MODE SENSE(10) page 0x3A sub-pages as earlier units, but:
 
-   - asked the legacy way (byte 1 = 0, DBD clear) the unit returns only a mode 
-     parameter header, 00 06 00 00 00 00 00 00, and no page.
-   - asked with DBD set (byte 1 = 0x08) and room for the header, the 8 byte 
-     mode parameter header is followed by the sub-page.  The vendor's software 
-     always sets DBD.
-   - __getsubpage() tries the legacy form first, so older units see no change.
+   - the vendor's software always sets DBD (byte 1 = 0x08) and allows room 
+     for a mode parameter header.  __getsubpage() tries the legacy form first 
+     (so older units see no change), then that form.
+   - observed only while the unit was rebuilding after a drive failure: both 
+     forms returned just a mode parameter header, 00 06 00 00 00 00 00 00, and 
+     no page.  The vendor's software could not see the unit at that time either, 
+     so this may be the busy state rather than the protocol.  To be confirmed on 
+     a healthy unit.
+
+ * Transport: over USB (and FireWire, Thunderbolt) the vendor's software uses 
+   ordinary SCSI pass-through, like drobo-utils.  Only for eSATA (device path 
+   containing 'esata') does it tunnel requests through reads and writes of the 
+   disk itself.
 
  * Do NOT send, even though it looks like a read: MODE SENSE page 0x3A, 
    sub-page 0xE1 or 0xE2, with a slot number in byte 4.  The vendor's software 
