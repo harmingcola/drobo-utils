@@ -147,7 +147,9 @@ class DroboIOctl:
         hoho = self.get_sub_page(hoholen, mcb, 0, self.debug)
         (dunno1, vendor, product) = struct.unpack(fmt, hoho)
 
-        return (host, channel, id, lun, vendor.decode())
+        # product added as a sixth element: some Drobos (e.g. the Drobo S Gen 2
+        # on USB 3) report a generic vendor, and are only recognizable by product.
+        return (host, channel, id, lun, vendor.decode(), product.decode())
 
     def get_sub_page(self, sz, mcb, out, DEBUG):
         """
@@ -319,9 +321,13 @@ def drobolunlist(debugflags=0, vendor="Drobo"):
                 print("id: ", id)
 
             thisdev = "%02d%02d%02d" % (id[0], id[1], id[2])
+            # The Drobo S Gen 2 (USB 3.0) reports vendor 'USB 3.0' and
+            # product 'Drobo S - Gen 2', so also accept a Drobo product id.
+            # Non-Drobos that slip through are rejected by Drobo.Drobo() checks.
             if ( id[4].lower().startswith("trusted") or \
                  id[4].lower().startswith("drobo") or \
-                 id[4].lower().startswith(vendor.lower()) ):  # you have a Drobo!
+                 id[4].lower().startswith(vendor.lower()) or \
+                 id[5].lower().startswith("drobo") ):  # you have a Drobo!
                 if debugflags & Drobo.DBG_Detection:
                     print("found a Drobo")
                 if thisdev == previousdev:  # multi-lun drobo...

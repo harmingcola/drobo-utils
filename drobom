@@ -180,7 +180,7 @@ def printscsi(d):
     for c in d.char_devs:
         dio = DroboIOctl.DroboIOctl(c, 0, Drobo.DEBUG)
         version = dio.version()
-        (host, channel, id, lun, vendor) = dio.identifyLUN()
+        (host, channel, id, lun, vendor) = dio.identifyLUN()[:5]
         if Drobo.DEBUG & Drobo.DBG_Chatty:
             print("%s: bus=scsi%d channel=%d id=%d lun=%d (vendor=%s, version=%d)" % \
               ( c, host, channel, id, lun, vendor, version ))

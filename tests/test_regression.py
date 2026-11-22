@@ -95,7 +95,8 @@ class FakeDevice:
 
     def identifyLUN(self):
         host, channel, id, lun = self.idlun
-        return (host, channel, id, lun, self.vendor.decode())
+        return (host, channel, id, lun, self.vendor.decode(),
+                self.product.decode())
 
     def closefd(self):
         pass
@@ -218,6 +219,24 @@ class TestDiscovery(unittest.TestCase):
         devs = {'sdb': FakeDevice(vendor=b'Newco   ', idlun=(1, 0, 0, 0))}
         self.assertEqual(self.discover(devs), [])
         self.assertEqual(self.discover(devs, 'Newco'), [['/dev/sdb']])
+
+    def test_drobo_s_gen2_found_by_product(self):
+        """ the Drobo S Gen 2 on USB 3 reports vendor 'USB 3.0', so is found
+            by its product id, without needing -s. """
+        found = self.discover({
+            'sdb': FakeDevice(vendor=b'USB 3.0 ',
+                              product=b'Drobo S - Gen 2 ',
+                              idlun=(1, 0, 0, 0)),
+        })
+        self.assertEqual(found, [['/dev/sdb']])
+
+    def test_generic_usb3_disk_rejected(self):
+        found = self.discover({
+            'sdb': FakeDevice(vendor=b'USB 3.0 ',
+                              product=b'Portable SSD    ',
+                              idlun=(1, 0, 0, 0)),
+        })
+        self.assertEqual(found, [])
 
     def test_ignores_non_disk_names(self):
         found = self.discover({
