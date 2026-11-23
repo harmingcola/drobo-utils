@@ -364,6 +364,27 @@ below from it; the code is our own.
    is NOT assumed to be the high word.  Bits 15 and 17 (set when healthy)
    are deliberately left unnamed, so they never show up as alert flags.
 
+ * Redundancy level (GetRedundancyLevel, _redundancylevel, shown by drobom
+   info health as 'Redundancy level: single/dual/undetermined').  The unit
+   does not report it (ReDrobo found sub-page 0x11 all zeros on a 5D), but
+   BeyondRAID holds back the largest disk for single redundancy and the two
+   largest for dual, so: held back = raw installed (sum of the disk
+   capacities, without an mSATA accelerator slot) minus the usable
+   protected total (GetSubPageCapacity()[2]).  Single if held back /
+   largest is within 5% of 1.0, dual if held back / (two largest) is,
+   undetermined if neither or both fit (both can only fit when the second
+   largest disk is tiny), or if there is no usable capacity.  ReDrobo's 5D
+   (2/2/4/2/4 TB, usable 5 962 106 142 720 bytes) gives 1.0049 for dual and
+   2.0098 for single, and its owner confirmed dual.  The window: the excess
+   over 1.0 is overhead (0.5% of the held back space there; relatively more
+   on arrays whose held back disks are small next to the whole), while the
+   two hypotheses differ by a factor of 1 + second largest / largest (2 for
+   equal disks), so 5% tolerates the overhead without confusing them.
+   Capacities come from sub-page 0x35, where disk type 4 (mSATA) marks the
+   accelerator, or from 0x03 on firmware without 0x35 (no accelerator
+   there).  Confirmed on one enclosure only (ReDrobo's own validation
+   table still lists the derivation as open).
+
 
 Making a Release
 ----------------

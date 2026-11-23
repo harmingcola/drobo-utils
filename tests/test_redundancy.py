@@ -112,5 +112,131 @@ class TestPrintHealthRegression(unittest.TestCase):
             self.assertIn(line, r.stdout)
 
 
+class TestRedundancyHelper(unittest.TestCase):
+    """ Drobo._redundancylevel(capacities, usable): pure. """
+
+    def level(self, caps, usable):
+        return Drobo._redundancylevel(caps, usable)
+
+    def test_5d_example_is_dual(self):
+        """ held back / two largest = 1.0049; / largest = 2.0098. """
+        self.assertEqual(self.level([TB2, TB2, TB4, TB2, TB4], USABLE_5D),
+                         'dual')
+
+    def test_single(self):
+        # 4 x 2 TB, one disk held back, plus 1% overhead
+        caps = [TB2] * 4
+        self.assertEqual(self.level(caps, int(3 * TB2 * 0.99)), 'single')
+
+    def test_single_mixed_sizes(self):
+        caps = [TB2, TB2, TB4, TB2, TB4]
+        usable = sum(caps) - int(TB4 * 1.01)
+        self.assertEqual(self.level(caps, usable), 'single')
+
+    def test_window_edges(self):
+        caps = [TB4] * 4
+        raw = sum(caps)
+        self.assertEqual(self.level(caps, raw - int(TB4 * 1.049)), 'single')
+        self.assertEqual(self.level(caps, raw - int(TB4 * 0.951)), 'single')
+        self.assertEqual(self.level(caps, raw - int(TB4 * 1.06)),
+                         'undetermined')
+        self.assertEqual(self.level(caps, raw - int(TB4 * 0.94)),
+                         'undetermined')
+        self.assertEqual(self.level(caps, raw - int(2 * TB4 * 1.049)), 'dual')
+        self.assertEqual(self.level(caps, raw - int(2 * TB4 * 1.06)),
+                         'undetermined')
+
+    def test_in_between_is_undetermined(self):
+        caps = [TB4] * 4
+        self.assertEqual(self.level(caps, sum(caps) - int(TB4 * 1.5)),
+                         'undetermined')
+
+    def test_ambiguous_is_undetermined(self):
+        """ a tiny second disk makes both ratios close to 1. """
+        caps = [TB4, 100000000000, TB4 // 100]
+        self.assertEqual(self.level(caps, sum(caps) - TB4 - 60000000000),
+                         'undetermined')
+
+    def test_no_usable_capacity(self):
+        self.assertEqual(self.level([TB2, TB2], 0), 'undetermined')
+        self.assertEqual(self.level([TB2, TB2], None), 'undetermined')
+
+    def test_no_disks(self):
+        self.assertEqual(self.level([], USABLE_5D), 'undetermined')
+        self.assertEqual(self.level([0, 0, 0], USABLE_5D), 'undetermined')
+
+    def test_usable_not_below_raw(self):
+        self.assertEqual(self.level([TB2, TB2], 2 * TB2), 'undetermined')
+        self.assertEqual(self.level([TB2, TB2], 3 * TB2), 'undetermined')
+
+    def test_empty_slots_ignored(self):
+        self.assertEqual(self.level([TB2, TB2, 0, TB4, 0, TB2, TB4],
+                                    USABLE_5D), 'dual')
+
+    def test_dual_needs_two_disks(self):
+        # one disk only: held back = everything, never 'dual'
+        self.assertNotEqual(self.level([TB4], int(TB4 * 0.001)), 'dual')
+
+
+class TestGetRedundancyLevel(unittest.TestCase):
+
+    def test_5d_dual_accelerator_excluded(self):
+        self.assertEqual(five_d().GetRedundancyLevel(), 'dual')
+
+    def test_5d_single(self):
+        raw = 2 * TB4 + 3 * TB2
+        self.assertEqual(five_d(raw - int(TB4 * 1.005)).GetRedundancyLevel(),
+                         'single')
+
+    def test_accelerator_would_spoil_it_if_counted(self):
+        """ counting the mSATA slot changes the answer for this array. """
+        raw = 2 * TB4 + 3 * TB2
+        self.assertEqual(
+            Drobo._redundancylevel([TB2, TB2, TB4, TB2, TB4, MSATA],
+                                   raw - int(TB4 * 1.04)), 'undetermined')
+        self.assertEqual(five_d(raw - int(TB4 * 1.04)).GetRedundancyLevel(),
+                         'single')
+
+    def test_legacy_slot_info_fallback(self):
+        """ no sub-page 0x35: capacities from sub-page 0x03. 2 x 500 GB in
+            the legacy fixture, one held back. """
+        d = make_drobo(CapacityDevice(None, int(500107862016 * 0.99)))
+        self.assertEqual(d.GetRedundancyLevel(), 'single')
+
+    def test_legacy_unit_only_mode_sense(self):
+        """ a first generation unit: only MODE SENSE page 0x3A reads. """
+        dev = FakeDevice()
+        d = make_drobo(dev)
+        dev.cdbs.clear()
+        self.assertIn(d.GetRedundancyLevel(),
+                      ('single', 'dual', 'undetermined'))
+        self.assertTrue(dev.cdbs)
+        self.assertEqual({(c[0], c[2]) for c in dev.cdbs}, {(0x5a, 0x3a)})
+
+    def test_capacity_failure_is_undetermined(self):
+        d = five_d()
+        with mock.patch.object(d, 'GetSubPageCapacity',
+                               side_effect=Drobo.DroboException('x')):
+            self.assertEqual(d.GetRedundancyLevel(), 'undetermined')
+
+    def test_simulation(self):
+        with mock.patch.object(Drobo, 'DEBUG', Drobo.DBG_Simulation):
+            self.assertEqual(Drobo.Drobo.GetRedundancyLevel(None),
+                             'undetermined')
+
+
+class TestPrintHealthLevel(unittest.TestCase):
+
+    def test_dual_after_redundancy_line(self):
+        out = run_printhealth(five_d())
+        self.assertEqual(out[:2], ['Redundancy: protected',
+                                   'Redundancy level: dual'])
+
+    def test_simulation(self):
+        r = drobom('info', 'health')
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertIn('Redundancy level: undetermined', r.stdout)
+
+
 if __name__ == '__main__':
     unittest.main()

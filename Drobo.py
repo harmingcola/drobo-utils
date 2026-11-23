@@ -286,6 +286,42 @@ def _statusseverity(status):
     return 'green'
 
 
+# redundancy level, derived from capacities as the ReDrobo project describes
+# (the unit does not report it): BeyondRAID holds back the largest disk for
+# single disk redundancy and the two largest for dual.  The held back space
+# also carries some overhead (0.5% of it on ReDrobo's 5D), so the ratio is
+# accepted within this window round 1.0.  The two hypotheses are at least a
+# factor of (1 + second largest / largest) apart, 2 for equal disks, so 5%
+# leaves room for overhead without confusing them.
+_REDUNDANCY_WINDOW = 0.05
+
+
+def _redundancylevel(capacities, usable):
+    """ 'single', 'dual' or 'undetermined', given the raw capacities of the
+        installed disks (bytes; empty slots as 0, accelerator excluded) and
+        the usable protected total (bytes.)
+
+        held back = sum(capacities) - usable.  single if held back / largest
+        is within _REDUNDANCY_WINDOW of 1, dual if held back / (two largest)
+        is; undetermined if neither or both fit, or the figures make no sense.
+    """
+    caps = sorted((c for c in capacities if c), reverse=True)
+    if not caps or not usable or usable <= 0:
+        return 'undetermined'
+    held = sum(caps) - usable
+    if held <= 0:
+        return 'undetermined'
+
+    def fits(ratio):
+        return abs(ratio - 1.0) <= _REDUNDANCY_WINDOW
+
+    single = fits(held / caps[0])
+    dual = len(caps) >= 2 and fits(held / (caps[0] + caps[1]))
+    if single != dual:
+        return 'single' if single else 'dual'
+    return 'undetermined'
+
+
 def _partformat(n):
     """ return Drobo's idea of what the partition type is
 
@@ -1649,6 +1685,34 @@ class Drobo:
             slots[-1]['rpm'] = _driverpm(f[7])
             off += stride
         return slots
+
+    def GetRedundancyLevel(self):
+        """ 'single', 'dual' or 'undetermined': the disk redundancy level,
+        which the unit does not report, derived from capacities (see
+        _redundancylevel.)  Disk capacities come from GetSlotInfo2
+        (sub-page 0x35), leaving out an mSATA accelerator slot, or from
+        GetSubPageSlotInfo (0x03) on firmware without 0x35 (those units have
+        no accelerator); the usable protected total from GetSubPageCapacity.
+
+        STATUS: rule from ReDrobo, checked on one Drobo 5D there; untested
+        here on hardware.
+        """
+        if DEBUG & DBG_Simulation:
+            slots = Drobo.GetSlotInfo2(self)
+            usable = Drobo.GetSubPageCapacity(self)[2]
+            return _redundancylevel([s['total_capacity'] for s in slots],
+                                    usable)
+        try:
+            slots = self.GetSlotInfo2()
+            if slots is None:
+                caps = [s[1] for s in self.GetSubPageSlotInfo()]
+            else:
+                caps = [s['total_capacity'] for s in slots
+                        if s['interface'] != 'mSATA']
+            usable = self.GetSubPageCapacity()[2]
+        except (DroboException, IOError, struct.error):
+            return 'undetermined'
+        return _redundancylevel(caps, usable)
 
     # system operations (0xEA) this module may send as reads.  Others exist
     # (firmware download, standby, power off, ...): never add one here without
