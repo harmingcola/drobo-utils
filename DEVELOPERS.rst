@@ -410,6 +410,20 @@ below from it; the code is our own.
    units use the same encoding is unknown; there, expect 'UTC offset
    unknown'.
 
+ * Options, sub-page 0x30: +4 yellow threshold %, +5 red threshold % (both
+   already read as YellowThreshold and RedThreshold), +6 a byte of packed
+   flags: use unprotected capacity, realtime data check, background data
+   check type (names from the vendor's ESAOptions::parse; which bit is
+   which is not published).  GetOptions() returns that byte, undecoded, as
+   OptionsFlags, which is read only (Drobo.READ_ONLY_OPTIONS; drobom set
+   refuses it).  Note that SetOptions() has always written 0 in that byte;
+   that is unchanged here, but it may clear those settings on newer units.
+   Options2, sub-page 0x31: +4 u64 featureOnOffStates (our Flags), +0x0C
+   u16 spin down delay in minutes (our SpinDownDelayMinutes, confirmed: 14
+   on ReDrobo's 5D), then the iSCSI addresses.  The page length fields of
+   0x30 and 0x31 report impossible values (2304 and 64513 for a 1308 byte
+   record), so they are never used: both pages are read at fixed offsets.
+
 
 Making a Release
 ----------------

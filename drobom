@@ -540,7 +540,9 @@ for u in l:
                 d.Sync()
             else:
                 options = d.GetOptions()
-                if args[1] in list(options.keys()):
+                if options is not None and args[1] in Drobo.READ_ONLY_OPTIONS:
+                    print('option is read-only: ', args[1])
+                elif args[1] in list(options.keys()):
                     # TODO: are all options integers? no..
                     if args[2] == 'True':
                         value = True

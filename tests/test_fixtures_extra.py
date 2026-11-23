@@ -282,7 +282,8 @@ class TestOptions(unittest.TestCase):
         d = self.drobo(p31=options2_page(0x0007))
         self.assertNotIn('SUPPORTS_OPTIONS2', d.features)
         self.assertEqual(d.GetOptions(),
-                         {'YellowThreshold': 85, 'RedThreshold': 95})
+                         {'YellowThreshold': 85, 'RedThreshold': 95,
+                          'OptionsFlags': 0})
         self.assertEqual(queried(self.dev), [0x30])
 
     def test_options_cdb(self):
@@ -312,6 +313,7 @@ class TestOptions(unittest.TestCase):
         self.assertEqual(d.GetOptions(), {
             'YellowThreshold': 85,
             'RedThreshold': 95,
+            'OptionsFlags': 0,
             'Flags': 0x0005,
             'SpinDownDelayMinutes': 15,
             'DualDiskRedundancy': True,
