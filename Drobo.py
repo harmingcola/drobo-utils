@@ -1032,7 +1032,7 @@ class Drobo:
                 if f[-5] == hwlevel[0]:
                     self.fwdata = z.read(f)
         else:  # old file...
-            f = open(name, 'r')
+            f = open(name, 'rb')
             self.fwdata = f.read()
             f.close()
 

@@ -282,17 +282,16 @@ class TestPickFirmware(CovTestCase):
 
     def test_plain_file_read_and_validated(self):
         name = self.path('Drobo_1.2.4.tdf')
-        with open(name, 'w') as f:
-            f.write('plain text firmware')
+        with open(name, 'wb') as f:
+            f.write(b'plain\r\nfirmware\r')
         with mock.patch.object(self.d, 'validateFirmware', return_value=1):
             self.assertEqual(self.d.PickFirmware(name), 1)
-        # read in text mode (see the bug below.)
-        self.assertEqual(self.d.fwdata, 'plain text firmware')
+        # read in binary mode: no newline translation, bytes not str.
+        self.assertEqual(self.d.fwdata, b'plain\r\nfirmware\r')
 
-    # BUG: a plain .tdf is opened in text mode, so binary firmware is
-    # decoded as text (or fails to decode) and fwdata is a str, which
+    # a plain .tdf used to be opened in text mode, so binary firmware was
+    # decoded as text (or failed to decode) and fwdata was a str, which
     # validateFirmware cannot unpack.
-    @unittest.expectedFailure
     def test_plain_file_read_as_bytes(self):
         name = self.path('Drobo_1.2.4.tdf')
         fw = make_firmware()
