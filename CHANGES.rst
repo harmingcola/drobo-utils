@@ -131,6 +131,10 @@ unreleased
   * fix simulation (-v 128): the constructor reads the simulated config,
     as on hardware, so slot_count is set and drobom -v 129 info slots on
     its own no longer raises AttributeError.
+  * fix simulation (-v 128): SetOptions(), SetLunSize() and writeFirmware()
+    write nothing, as Sync() already did; they wrote through the missing
+    device (fd None), so drobom -v 128 set <option> and set lunsize raised
+    AttributeError.  No change on hardware.
 
 0.6.2.2: 2010/02/06
 -------------------

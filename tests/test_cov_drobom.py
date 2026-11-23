@@ -837,13 +837,20 @@ class TestSet(DrobomTestCase):
         so.assert_not_called()
         self.assertEqual(r.out, 'option not present:  Colour\n')
 
-    @unittest.expectedFailure
     def test_option_simulated(self):
-        """ BUG (Drobo.py): SetOptions ignores the simulation flag and
-            writes through self.fd, which is None in simulation, so
-            'drobom -v 128 set <option> ...' raises AttributeError. """
+        """ simulation: SetOptions sends nothing.  (It used to ignore the
+            simulation flag and write through self.fd, which is None in
+            simulation, so this raised AttributeError.) """
         r = self.drobom(*SIM, *ONE, 'set', 'SpinDownDelayMinutes', '15')
+        self.assertEqual(r.code, FELL_THROUGH)
         self.assertEqual(r.out, '')
+        self.assertEqual(r.err, '')
+
+    def test_lunsize_simulated(self):
+        """ simulation: SetLunSize sends nothing (it used to write through
+            self.fd, None in simulation.) """
+        r = self.drobom(*SIM, *ONE, '-y', 'set', 'lunsize', '2')
+        self.assertIn('Done... Drobo is likely now rebooting.', r.out)
 
 
 # --- format, firmware, shutdown --------------------------------------------------

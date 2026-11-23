@@ -520,6 +520,13 @@ class TestWriteFirmware(CovTestCase):
         return struct.pack('>BBBBBBBHB', 0xea, 0x10, b2, op, 0x00, txid, flags,
                            length, 0x00)
 
+    def test_simulation_sends_nothing(self):
+        out = self.write(70000, flags=Drobo.DBG_Simulation)
+        self.assertEqual(self.dev.writes, [])
+        self.assertEqual(self.dev.cdbs, [])
+        self.assertEqual(self.progress, [])
+        self.assertEqual(out, '')
+
     def test_pages_sent(self):
         out = self.write(70000)
         total = len(self.fw)
