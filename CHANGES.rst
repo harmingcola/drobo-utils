@@ -117,6 +117,9 @@ unreleased
     instead of 0, which could switch off use unprotected capacity / data
     check settings on newer units when a threshold was set.  Units without
     that byte get the same bytes as before; the flags stay read only.
+  * fix drobom --verbose: usage and the man page advertise it, but only
+    --verbosity was declared, so --verbose was rejected as a bad option.
+    Both now work.
 
 0.6.2.2: 2010/02/06
 -------------------
