@@ -26,6 +26,8 @@ from test_regression import FakeDevice, make_drobo, setUpModule, \
 from test_fixtures_extra import (responder, queried, LUNINFO, LUNINFO2,
                                  BASE_FEATURES, SUPPORTS_NEW_LUNINFO2, TB)
 
+from test_luninfo_ex2 import load_drobom_functions
+
 import Drobo
 
 FEATURES = BASE_FEATURES | SUPPORTS_NEW_LUNINFO2
@@ -122,6 +124,32 @@ class TestLUNInfo2Fallback(unittest.TestCase):
                                side_effect=KeyError('bug')):
             with self.assertRaises(KeyError):
                 d.GetSubPageLUNs()
+
+
+def run_printluns(d, chatty=True):
+    ns = load_drobom_functions('togig', 'printluns')
+    out = []
+    ns['print'] = lambda *a: out.append(' '.join(str(x) for x in a))
+    with mock.patch.object(Drobo, 'DEBUG', Drobo.DBG_Chatty if chatty else 0):
+        ns['printluns'](d)
+    return out
+
+
+class TestInfoLunsRegression(unittest.TestCase):
+    """ drobom info luns, as it was. """
+
+    def test_chatty_luninfo2(self):
+        d, _ = drobo(refuse=())
+        self.assertEqual(run_printluns(d), [
+            'lun     size (GB) used    PTFmt  FStype:',
+            '  0     2199         5      GPT [\'EXT3\'] ',
+            '  1     1099         0      MBR [\'NTFS\'] ',
+        ])
+
+    def test_plain_luninfo(self):
+        d, _ = drobo(features=BASE_FEATURES)
+        self.assertEqual(run_printluns(d, chatty=False),
+                         [str(t) for t in OLD_LUNS])
 
 
 if __name__ == '__main__':
