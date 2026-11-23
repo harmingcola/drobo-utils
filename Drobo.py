@@ -1166,7 +1166,7 @@ class Drobo:
         self.fwdata = None
         firmware_url = urllib.request.urlopen(Drobo.fwsite + fwname)
         filedata = firmware_url.read()
-        f = open(localfw, 'w+')
+        f = open(localfw, 'wb')
         f.write(filedata)
         f.close()
         if (DEBUG & DBG_Chatty):
