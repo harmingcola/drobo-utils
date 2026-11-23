@@ -126,6 +126,8 @@ unreleased
   * fix drobom status (also shown by set lunsize and format) for a Drobo
     with an empty name: it is shown as '-' as intended; replacing it in the
     settings tuple raised TypeError.
+  * fix drobom view without PyQt5: print the hint and exit with status 1,
+    instead of carrying on and failing with an ImportError traceback.
 
 0.6.2.2: 2010/02/06
 -------------------

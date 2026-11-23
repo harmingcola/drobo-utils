@@ -605,6 +605,7 @@ for u in l:
         except:
             print("QT support missing, no GUI possible")
             print("perhaps following will help: apt-get install python3-qtpy")
+            sys.exit(1)
 
         from DroboGUI import DroboGUI
 
