@@ -61,6 +61,9 @@ unreleased
   * drobom info drives: temperature 0 (not populated on some firmware)
     shows as '-'; an mSATA accelerator slot (disk type 4, GetSlotInfo2()
     'accelerator') is listed apart, after the drive bays.
+  * GetSubPageLUNs(): if the unit refuses LUNINFO2 (sub-page 0x07, absent
+    from the vendor's Mac driver), fall back to the LUNINFO (0x04) result
+    instead of failing.
   * tests: more regression fixtures (LUN info, options, DroboPro inquiry.)
   * name status bits: incompatible disk pack, power supply missing, fan
     partially failed, fan failed, fan missing.

@@ -89,5 +89,40 @@ class TestLUNsRegression(unittest.TestCase):
                                ['EXT3'])])
 
 
+class TestLUNInfo2Fallback(unittest.TestCase):
+    """ 0x07 refused: the 0x04 result instead of an error. """
+
+    def test_io_error(self):
+        d, dev = drobo(how='ioerror')
+        self.assertEqual(quiet(d.GetSubPageLUNs), OLD_LUNS)
+        self.assertEqual(queried(dev)[:2], [0x04, 0x07])
+
+    def test_short_reply(self):
+        """ a short reply makes __getsubpage raise DroboException. """
+        d, _ = drobo(how='short')
+        self.assertEqual(quiet(d.GetSubPageLUNs), OLD_LUNS)
+
+    def test_refusal_remembered(self):
+        """ asked once: later calls read 0x04 only. """
+        d, dev = drobo(how='ioerror')
+        quiet(d.GetSubPageLUNs)
+        dev.cdbs.clear()
+        self.assertEqual(quiet(d.GetSubPageLUNs), OLD_LUNS)
+        self.assertEqual(queried(dev), [0x04])
+
+    def test_feature_list_unchanged(self):
+        d, _ = drobo(how='ioerror')
+        quiet(d.GetSubPageLUNs)
+        self.assertIn('SUPPORTS_NEW_LUNINFO2', d.features)
+
+    def test_other_errors_not_swallowed(self):
+        """ only a refusal falls back; a decoding bug still shows. """
+        d, _ = drobo(refuse=())
+        with mock.patch.object(Drobo, '_partscheme',
+                               side_effect=KeyError('bug')):
+            with self.assertRaises(KeyError):
+                d.GetSubPageLUNs()
+
+
 if __name__ == '__main__':
     unittest.main()
