@@ -87,6 +87,9 @@ unreleased
   * fix identifyLUN(): decode the kernel's scsi_idlun (native dev_id) so
     channel and id are no longer swapped, and host numbers above 127 are no
     longer negative (drobom info config, -v 16 trace.)
+  * fix Sync(): a str name (the current name, or drobom set name NEW) is
+    encoded as ASCII for the 32 byte field; it raised struct.error on
+    Python 3, breaking drobom set time / set name and the GUI time sync.
 
 0.6.2.2: 2010/02/06
 -------------------

@@ -160,24 +160,37 @@ class TestSync(DroboCase):
         self.sync(b'A' * 40)
         self.assertEqual(self.dev.puts[0][1][10:], b'A' * 32)
 
-    @unittest.expectedFailure
     def test_sync_without_name_keeps_current_name(self):
-        # BUG: GetSubPageSettings()[2] is a str under Python 3, and
-        # struct.pack('32s') needs bytes: struct.error. `drobom set time`
-        # and the GUI's time sync both call Sync() like this.
+        """ GetSubPageSettings()[2] is a str under Python 3; Sync encodes it
+            for the 32s field. `drobom set time` and the GUI's time sync
+            both call Sync() like this. """
         self.sync()
         self.assertEqual(self.dev.puts, [self.expected(b'TRUSTED DATA')])
 
-    @unittest.expectedFailure
     def test_sync_with_str_name(self):
-        # BUG: `drobom set name NEW` calls Sync(args[2]) with a str, which
-        # struct.pack('32s') rejects under Python 3 (struct.error).
+        """ `drobom set name NEW` calls Sync(args[2]) with a str. """
         self.sync('NEWNAME')
         self.assertEqual(self.dev.puts, [self.expected(b'NEWNAME')])
 
-    def test_sync_str_name_currently_raises_struct_error(self):
-        with self.assertRaises(struct.error):
-            self.sync('NEWNAME')
+    def test_sync_str_and_bytes_names_send_the_same_bytes(self):
+        self.sync('NEWNAME')
+        self.sync(b'NEWNAME')
+        self.assertEqual(self.dev.puts[0], self.dev.puts[1])
+
+    def test_sync_long_str_name_is_truncated_to_32_bytes(self):
+        self.sync('B' * 40)
+        self.assertEqual(self.dev.puts[0][1][10:], b'B' * 32)
+
+    def test_sync_short_str_name_is_nul_padded(self):
+        self.sync('ab')
+        self.assertEqual(self.dev.puts[0][1][10:], b'ab' + b'\0' * 30)
+
+    def test_sync_non_ascii_str_name_is_refused_before_sending(self):
+        """ the name is ASCII on the wire (GetSubPageSettings decodes it as
+            UTF-8, which round trips only ASCII); anything else raises
+            before a byte goes to the Drobo. """
+        with self.assertRaises(UnicodeEncodeError):
+            self.sync('Caf\xe9')
         self.assertEqual(self.dev.puts, [])
 
     def test_sync_simulation_sends_nothing(self):
