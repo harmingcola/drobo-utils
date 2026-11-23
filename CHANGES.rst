@@ -58,6 +58,9 @@ unreleased
     +6 of sub-page 0x30 (use unprotected capacity, realtime and background
     data check; bits not decoded); drobom set refuses it.  Existing keys
     unchanged; the unreliable 0x30/0x31 length fields stay unused.
+  * drobom info drives: temperature 0 (not populated on some firmware)
+    shows as '-'; an mSATA accelerator slot (disk type 4, GetSlotInfo2()
+    'accelerator') is listed apart, after the drive bays.
   * tests: more regression fixtures (LUN info, options, DroboPro inquiry.)
   * name status bits: incompatible disk pack, power supply missing, fan
     partially failed, fan failed, fan missing.
