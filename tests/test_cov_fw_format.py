@@ -422,8 +422,9 @@ class TestUpdateFirmwareRepository(CovTestCase):
         p.start()
         self.addCleanup(p.stop)
 
-    def run_update(self, latest=LATEST, download=None, valid=1, picked=1):
-        self.debug(Drobo.DBG_Chatty)
+    def run_update(self, latest=LATEST, download=None, valid=1, picked=1,
+                   flags=Drobo.DBG_Chatty):
+        self.debug(flags)
         self.download = mock.Mock(return_value=download or b'fw')
         self.validate = mock.Mock(return_value=valid)
         self.pickfw = mock.Mock(return_value=picked)
@@ -453,6 +454,23 @@ class TestUpdateFirmwareRepository(CovTestCase):
         self.assertIn('looking for: %s' % self.local, out)
         self.assertIn('not present, fetching from drobo.com', out)
         self.assertIn('correct fw available', out)
+
+    def test_hwlevel_as_str(self):
+        """ hwlevel may be str (the simulation placeholders) or bytes. """
+        r, out = self.run_update(latest=self.LATEST[:2] + ('1.00', ) +
+                                 self.LATEST[3:])
+        self.assertEqual(r, 1)
+        self.download.assert_called_once_with('/fw/v1/Drobo_1.2.4.tdz',
+                                              self.local)
+
+    def test_simulation_neither_downloads_nor_reads(self):
+        r, out = self.run_update(latest=('fwarch', 'fwv', 'hwlevel', 'value'),
+                                 flags=Drobo.DBG_Simulation | Drobo.DBG_Chatty)
+        self.assertEqual(r, 0)
+        self.download.assert_not_called()
+        self.validate.assert_not_called()
+        self.pickfw.assert_not_called()
+        self.assertIn('looking for: %s/fwarch_hwlevel_value' % self.repo, out)
 
     def test_download_does_not_validate(self):
         r, out = self.run_update(valid=0)

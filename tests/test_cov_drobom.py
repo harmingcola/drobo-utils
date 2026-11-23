@@ -921,14 +921,19 @@ class TestFirmware(DrobomTestCase):
         sync.assert_called_once_with()
         self.assertEqual(r.out, 'write is 50% done.\n')
 
-    @unittest.expectedFailure
     def test_fwupgrade_simulated(self):
-        """ BUG (Drobo.py): in simulation, PickLatestFirmware returns str
-            placeholders, and updateFirmwareRepository creates the local
-            repository (~/.drobo-utils, redirected to a temp dir here) and
-            then fails on hwlevel.decode() with AttributeError. """
-        r = self.drobom(*SIM, *ONE, 'fwupgrade')
+        """ in simulation, PickLatestFirmware returns str placeholders
+            (hwlevel used to be .decode()d, AttributeError.)  Nothing is
+            downloaded (urlopen is a guard here) and nothing is written. """
+        with mock.patch.object(Drobo.Drobo, 'writeFirmware') as write:
+            r = self.drobom(*SIM, *ONE, 'fwupgrade')
         self.assertEqual(r.code, FELL_THROUGH)
+        self.assertEqual(r.out, '')
+        write.assert_not_called()
+        # pinned, review: the local repository (~/.drobo-utils, redirected
+        # to a temp dir here) is still created, even in simulation.
+        self.assertTrue(os.path.isdir(Drobo.Drobo.localfwrepository))
+        self.assertEqual(os.listdir(Drobo.Drobo.localfwrepository), [])
 
 
 class TestShutdown(DrobomTestCase):

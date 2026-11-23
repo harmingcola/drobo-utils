@@ -109,6 +109,9 @@ unreleased
     mode failed to decode binary firmware or mangled its line endings.
   * fix downloadFirmware(): write the local copy in binary mode; writing the
     downloaded bytes to a text file raised TypeError (fwupgrade).
+  * fix drobom -v 128 fwupgrade (simulation): accept the hardware revision
+    as str or bytes (str.decode() raised AttributeError), and stop before
+    downloading or writing firmware, which a simulated Drobo cannot take.
 
 0.6.2.2: 2010/02/06
 -------------------
