@@ -216,12 +216,13 @@ class TestOptions(DrobomTestCase):
         r = self.drobom('--verbosity=128', 'list')
         self.assertEqual(r.out, '/dev/sdx:/dev/sdy /dev/sdz\n')
 
-    @unittest.expectedFailure
     def test_long_verbose(self):
-        """ BUG: usage advertises --verbose, but getopt only knows
-            --verbosity, so --verbose is rejected as a bad option. """
-        r = self.drobom('--verbose=128', 'list')
-        self.assertEqual(r.out, '/dev/sdx:/dev/sdy /dev/sdz\n')
+        """ usage advertises --verbose (it used to be rejected as a bad
+            option: getopt only knew --verbosity.) """
+        for args in (('--verbose=128', ), ('--verbose', '128')):
+            r = self.drobom(*args, 'list')
+            self.assertIsNone(r.code)
+            self.assertEqual(r.out, '/dev/sdx:/dev/sdy /dev/sdz\n')
 
     def test_string_passed_to_discovery(self):
         with mock.patch.object(Drobo, 'DiscoverLUNs',
