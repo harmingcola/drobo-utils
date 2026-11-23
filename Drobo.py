@@ -851,6 +851,10 @@ class Drobo:
     it is written back unchanged: options["OptionsFlags"] when present (as
     GetOptions returns it), else read now.  Units that report no such byte
     get 0 there, as they always have.  It is never set from user input.
+
+    On OPTIONS2 units without iSCSI, GetOptions gives no UseStaticIPAddress,
+    IPAddress or NetMask; whichever of those the dict lacks is written back
+    as the unit reports it now (sub-page 0x31, read before any write.)
     """
         if DEBUG & DBG_Simulation:  # nothing to write to
             return
@@ -862,6 +866,17 @@ class Drobo:
             except (IOError, DroboException):
                 current = None
             flags = (current or {}).get("OptionsFlags", 0)
+
+        unit_fields = ('UseStaticIPAddress', 'IPAddress', 'NetMask')
+        if 'SUPPORTS_OPTIONS2' in self.features and \
+           not all(k in options for k in unit_fields):
+            o2 = self.__getsubpage(0x31, 'QHLLLHLLLH')  # as GetOptions
+            options = dict(options)
+            options.setdefault('UseStaticIPAddress', (o2[0] & 0x0008) > 0)
+            options.setdefault('IPAddress',
+                               socket.inet_ntoa(struct.pack('>L', o2[2])))
+            options.setdefault('NetMask',
+                               socket.inet_ntoa(struct.pack('>L', o2[3])))
 
         # v1 Options first...
         fmt = 'BBBLBB'
