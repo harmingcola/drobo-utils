@@ -949,6 +949,14 @@ class TestSimulationInProcess(CovTestCase):
         self.assertIsNone(self.d.fd)
         self.assertEqual(self.d.fw[6], 'ArmMarvell')
 
+    def test_slot_count_set_by_constructor(self):
+        """ as on hardware, the constructor reads the (simulated) config,
+            so slot_count is there before GetSubPageConfig is called. """
+        self.assertEqual(self.d.slot_count, 8)
+        with self.stdout():
+            self.assertEqual(len(self.d.GetSubPageSlotInfo()),
+                             self.d.slot_count)
+
     def test_queries(self):
         d = self.d
         with self.stdout():
