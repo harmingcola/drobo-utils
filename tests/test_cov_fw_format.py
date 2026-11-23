@@ -265,16 +265,16 @@ class TestPickFirmware(CovTestCase):
         self.assertIn('Reading Firmware from = %s' % self.tdz, out)
         self.assertIn('Drobo_v1.2.4_1.tdf  ? ', out)
         self.assertIn('Drobo_v1.2.4_2.tdf  ? ', out)
-        self.assertIn('firmware for hw rev  2  this drobo is rev ', out)
+        self.assertIn('firmware for hw rev  1  this drobo is rev  1\n', out)
+        self.assertIn('firmware for hw rev  2  this drobo is rev  1\n', out)
 
     def test_zipped_result_is_validate_result(self):
         with mock.patch.object(self.d, 'validateFirmware', return_value=0):
             self.assertEqual(self.d.PickFirmware(self.tdz), 0)
 
-    # BUG: the hardware revision from INQUIRY is bytes, so hwlevel[0] is an
-    # int (0x31) and never equals the member name's character ('1'): no
-    # member is ever picked from a .tdz, and self.fwdata is not set.
-    @unittest.expectedFailure
+    # the hardware revision from INQUIRY is bytes: hwlevel[0] used to be an
+    # int (0x31) that never equalled the member name's character ('1'), so
+    # no member was ever picked and self.fwdata was not set.
     def test_zipped_picks_member_for_hw_revision(self):
         with mock.patch.object(self.d, 'validateFirmware', return_value=1):
             self.d.PickFirmware(self.tdz)

@@ -1022,7 +1022,7 @@ class Drobo:
 
         if (name[-1] == 'z'):  # data is zipped...
             inqw = self.inquiry
-            hwlevel = inqw[10]
+            hwlevel = inqw[10].decode('latin-1')  # INQUIRY revision is bytes
             z = zipfile.ZipFile(name, 'r')
             for f in z.namelist():
                 if (DEBUG & DBG_General):
