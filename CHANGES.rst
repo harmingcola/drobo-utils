@@ -123,6 +123,9 @@ unreleased
   * fix drobom --yes: the long option was declared as 'y', so --yes was
     rejected as a bad option and --y tripped 'assert False'.  --yes now
     answers yes like -y (--no already worked).
+  * fix drobom status (also shown by set lunsize and format) for a Drobo
+    with an empty name: it is shown as '-' as intended; replacing it in the
+    settings tuple raised TypeError.
 
 0.6.2.2: 2010/02/06
 -------------------
