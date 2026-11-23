@@ -266,6 +266,22 @@ USB 3 era units:
    diagnostics, the user event log, standby and power off.  Treat any new 
    0xEA operation as dangerous until proven to be a pure read.
 
+ * 0xEA framing must match the data phase.  Static analysis of the Drobo S
+   firmware 2.1.5 (its USB layer's 0xEA handler) shows the unit takes the
+   direction from byte 2 bit 7 (clear: host to device) and the transfer
+   length from bytes 7-8, and waits for that much data-out before acting.
+   If the host's actual transfer disagrees (say length 1 but no data-out),
+   the USB layer reports a phase error, and USB mass storage rules then
+   make the host reset the device.  drobo-driverkit reports a Drobo 8D
+   restarting over and over on exactly that framing of blink.
+   drobo-utils is not affected: __issueCommand (blink 0x06, standby 0x0d)
+   sends ea 10 00 <op> 00 <txid> 20 00 01 00 through get_sub_page(1, cdb,
+   1), i.e. SG_DXFER_TO_DEV with a one byte, zeroed buffer, which is the
+   well formed form the vendor's software uses.  Keep it that way: the
+   TestVendorCommandFraming tests (tests/test_cov_ioctl.py) check that every
+   0xEA command's SG direction and dxfer_len agree with its CDB.  Not yet
+   confirmed with a usbmon capture on hardware.
+
  * 0xEA system operation layout (10 bytes): ea 10 <dir> <op> <arg> <txid> 
    <flags> <length16> <x>, where dir is 0x80 for a read (data from the unit.)  
    The vendor's software reads extended LUN info with op 0x81, arg = first 
