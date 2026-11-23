@@ -18,7 +18,6 @@ named COPYING in the root of the source directory tree.
 
 import builtins
 import io
-import locale
 import os
 import struct
 import sys
@@ -673,9 +672,6 @@ def encrypt(text, key):
     return ''.join(chr(ord(c) ^ key) for c in text)
 
 
-UTF8 = locale.getpreferredencoding(False).lower().replace('-', '') == 'utf8'
-
-
 class TestDecodeDiagnostics(DroboCase):
 
     def setUp(self):
@@ -684,9 +680,13 @@ class TestDecodeDiagnostics(DroboCase):
         self.addCleanup(tmp.cleanup)
         self.tmp = tmp.name
 
-    def write(self, data, mode='w'):
+    def write(self, data):
+        """ write the (encrypted) file byte for byte; a str is one byte
+            per character. """
+        if isinstance(data, str):
+            data = data.encode('latin-1')
         path = os.path.join(self.tmp, 'diag.log')
-        with open(path, mode) as f:
+        with open(path, 'wb') as f:
             f.write(data)
         return path
 
@@ -698,18 +698,20 @@ class TestDecodeDiagnostics(DroboCase):
                 path = self.write(encrypt(plain, key))
                 self.assertEqual(self.d.decodeDiagnostics(path), plain)
 
-    @unittest.expectedFailure
     def test_encrypted_carriage_return_survives(self):
-        # BUG: text mode reading translates newlines, so an encrypted byte
-        # that happens to be '\r' (here ' ' ^ 0x2d) comes back as '\n' and
-        # decodes to "'" instead of ' '.
+        """ an encrypted byte that happens to be CR (here ' ' ^ 0x2d) is
+            not translated to LF (it was, in text mode, and decoded to
+            "'" instead of ' '). """
         plain = '-- Drobo --'
         path = self.write(encrypt(plain, 0x2d))
         self.assertEqual(self.d.decodeDiagnostics(path), plain)
 
-    def test_carriage_return_currently_corrupted(self):
-        path = self.write(encrypt('-- Drobo --', 0x2d))
-        self.assertEqual(self.d.decodeDiagnostics(path), "--'Drobo'--")
+    def test_encrypted_crlf_survives(self):
+        plain = '-- a\r\nb\rc\n'
+        for key in (0x00, 0x2d, 0x27):
+            with self.subTest(key=key):
+                path = self.write(encrypt(plain, key))
+                self.assertEqual(self.d.decodeDiagnostics(path), plain)
 
     def test_wrong_first_byte_gives_garbage_not_error(self):
         path = self.write(encrypt('Xabc', 0x01))
@@ -726,20 +728,23 @@ class TestDecodeDiagnostics(DroboCase):
         with self.assertRaises(IndexError):
             self.d.decodeDiagnostics(path)
 
-    @unittest.skipUnless(UTF8, 'pins behaviour under a UTF-8 locale')
-    def test_non_utf8_file_returns_empty_string(self):
-        path = self.write(bytes([0x2d ^ 0x55, 0xff, 0xfe]), 'wb')
-        self.assertEqual(self.d.decodeDiagnostics(path), '')
-
-    @unittest.skipUnless(UTF8, 'pins behaviour under a UTF-8 locale')
-    @unittest.expectedFailure
     def test_binary_diag_file_decodes(self):
-        # BUG: the file is read in text mode with the locale encoding, so a
-        # real (binary) diagnostics file with bytes >= 0x80 that are not
-        # valid UTF-8 fails to decode and the bare except returns ''.
+        """ a real (binary) diagnostics file has bytes >= 0x80 that are not
+            valid UTF-8; they decode one character per byte, whatever the
+            locale. (Text mode reading failed to decode them, and the bare
+            except returned ''.) """
         raw = bytes(b ^ 0x55 for b in b'-\xa0\xff ok')
-        path = self.write(raw, 'wb')
+        path = self.write(raw)
         self.assertEqual(self.d.decodeDiagnostics(path), '-\xa0\xff ok')
+
+    def test_every_byte_value_decodes_to_one_character(self):
+        plain = b'-' + bytes(range(256))
+        for key in (0x00, 0x55, 0xd2):
+            with self.subTest(key=key):
+                path = self.write(bytes(b ^ key for b in plain))
+                out = self.d.decodeDiagnostics(path)
+                self.assertIsInstance(out, str)
+                self.assertEqual(out, plain.decode('latin-1'))
 
 
 # --- SlotCount, GetCharDev, __del__ --------------------------------------------

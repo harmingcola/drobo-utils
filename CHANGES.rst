@@ -96,6 +96,9 @@ unreleased
   * fix dumpDiagnostics(): write the file in binary mode; writing the
     records' bytes to a text file raised TypeError, breaking drobom diag
     and the GUI Diagnostics button.
+  * fix decodeDiagnostics(): read the file as bytes and decode one character
+    per byte; text mode returned '' for non UTF-8 bytes and turned an
+    encrypted CR into LF, corrupting drobom diagprint output.
 
 0.6.2.2: 2010/02/06
 -------------------
