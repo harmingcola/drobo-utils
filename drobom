@@ -319,12 +319,21 @@ def printluns(d):
             print(i)
 
 
+def printclock(d):
+    """ the unit's own clock face and UTC offset (see Drobo.GetClock). """
+    try:
+        print('Drobo clock: %s' % Drobo._clocktext(d.GetClock()))
+    except (Drobo.DroboException, IOError):
+        pass
+
+
 def info(d, choices):
     if debug & Drobo.DBG_Chatty:
         s = d.GetSubPageSettings()
         print('---------------------------------------------------------')
         print('Drobo Name: %-10s Devices: %s' % (s[2], ':'.join(d.char_devs)))
         print('      Time:', time.ctime(s[0]))
+        printclock(d)
         print('---------------------------------------------------------')
 
     for c in choices:
@@ -556,6 +565,7 @@ for u in l:
     elif cmd == "time":
         settings = d.GetSubPageSettings()
         print("Drobo says it is:", time.ctime(settings[0]))
+        printclock(d)
 
     elif cmd == "view":
         try:

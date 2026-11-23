@@ -157,6 +157,29 @@ def _diskhealth(state):
                                                                   'Unknown')
 
 
+def _clockoffset(raw):
+    """ the gmtOffset u16 of sub-page 0x05 as minutes east of UTC (read as
+        signed, so zones west of UTC are negative: 0xfe20 is -480, UTC-8),
+        or None when it is not a plausible offset (more than 14 hours
+        either way), as with the bytes first generation units were seen to
+        send (0x0800.)  Source: ReDrobo docs/PROTOCOL.md.
+    """
+    minutes = raw - 0x10000 if raw & 0x8000 else raw
+    if abs(minutes) > 14 * 60:
+        return None
+    return minutes
+
+
+def _clocktext(clock):
+    """ text for a GetClock() dictionary: the unit's clock face and its UTC
+        offset, e.g. '2026-08-19 16:19:07 (UTC+02:00)'. """
+    off = clock['offset_minutes']
+    if off is None:
+        return '%s (UTC offset unknown)' % clock['local']
+    return '%s (UTC%s%02d:%02d)' % (clock['local'], '-' if off < 0 else '+',
+                                    abs(off) // 60, abs(off) % 60)
+
+
 def _pagebody(out, sub_page):
     """ given bytes starting at a page 0x3A sub page header, return the sub
         page body (as long as its header says, or as much as arrived), or
@@ -1480,6 +1503,10 @@ class Drobo:
                    when two byte value read in network byte order, result is 2048.
                    they stuff it in LSB order, so the 8 ended up in the higher order byte.
                 -- so I just claim it says 8 and shut up.
+                -- ReDrobo (checked on a Drobo 5D) found gmtOffset is a u16 of
+                   minutes east of UTC, and the time is the unit's LOCAL clock.
+                   GetClock() decodes that; this function stays as it was so
+                   first generation units behave as before.
 
      """
         if DEBUG & DBG_Simulation:
@@ -1489,6 +1516,40 @@ class Drobo:
         name = name.decode().strip(" \0")
         offset = 8  # offset is screwed up returned by Drobo, just set it to what they claim it should be.
         return (utc, offset, name)
+
+    def GetClock(self):
+        """ the unit's clock, from the settings sub-page (0x05).  returns a
+        dictionary:
+
+          time           - the raw currentTime u32
+          raw_offset     - the raw gmtOffset u16
+          offset_minutes - gmtOffset as minutes east of UTC (120 is UTC+2),
+                           or None when implausible (see _clockoffset)
+          local          - the unit's wall clock, 'YYYY-MM-DD HH:MM:SS'
+          utc            - the matching Unix time, or None if the offset
+                           is unknown
+
+        currentTime is the unit's LOCAL wall clock, not UTC: format it as
+        UTC to get the clock face, and subtract the offset to get real UTC.
+        Facts from ReDrobo (docs/PROTOCOL.md, checked on a Drobo 5D, fw
+        4.2.3.)  drobom set time (Sync) writes the host's UTC time with
+        offset 0, so a unit set that way shows UTC with offset 0.
+
+        Gen 1 caveat: the original author saw offset bytes that read 0x0800
+        on a first generation unit (hence GetSubPageSettings always saying
+        8); those give offset_minutes None here, and the clock face is shown
+        as the unit holds it.  GetSubPageSettings is unchanged.
+        Untested on hardware here.
+        """
+        if DEBUG & DBG_Simulation:
+            when, raw = 1220112079, 0
+        else:
+            when, raw = self.__getsubpage(0x05, 'LH32s')[:2]
+        off = _clockoffset(raw)
+        return {'time': when, 'raw_offset': raw, 'offset_minutes': off,
+                'local': time.strftime('%Y-%m-%d %H:%M:%S',
+                                       time.gmtime(when)),
+                'utc': None if off is None else when - off * 60}
 
     def GetSubPageProtocol(self):
         """ 
