@@ -90,6 +90,9 @@ unreleased
   * fix Sync(): a str name (the current name, or drobom set name NEW) is
     encoded as ASCII for the 32 byte field; it raised struct.error on
     Python 3, breaking drobom set time / set name and the GUI time sync.
+  * fix Sync() and SetOptions(): the mode select sub-page header gives the
+    big endian payload length (38, 9 and 19 bytes) instead of the native
+    struct size (42, 18 and 33 on 64-bit).  No other byte changes.
 
 0.6.2.2: 2010/02/06
 -------------------
