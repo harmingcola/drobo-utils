@@ -844,13 +844,26 @@ class Drobo:
          basic thresholds work on Drobo v1.
          OPTIONS2 tested by folks on the internet.  Seem OK.
 
+    The byte at +6 of sub-page 0x30 packs settings on newer units (use
+    unprotected capacity, realtime and background data check; ReDrobo), so
+    it is written back unchanged: options["OptionsFlags"] when present (as
+    GetOptions returns it), else read now.  Units that report no such byte
+    get 0 there, as they always have.  It is never set from user input.
     """
+        flags = options.get("OptionsFlags")
+        if flags is None:
+            try:
+                current = self.GetOptions()
+            except (IOError, DroboException):
+                current = None
+            flags = (current or {}).get("OptionsFlags", 0)
+
         # v1 Options first...
         fmt = 'BBBLBB'
         payloadlen = struct.calcsize(">" + fmt)
         buffer = struct.pack(">BBH" + fmt, 0x7a, 0x30, payloadlen,
                              options["YellowThreshold"],
-                             options["RedThreshold"], 0, 0, 0, 0)
+                             options["RedThreshold"], flags, 0, 0, 0)
         sblen = len(buffer)
         modepageblock = struct.pack(">BBBBBBBHB", 0x55, 0x01, 0x7a, 0x30, 0, 0,
                                     0, sblen, 0)

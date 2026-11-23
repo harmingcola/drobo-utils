@@ -112,6 +112,11 @@ unreleased
   * fix drobom -v 128 fwupgrade (simulation): accept the hardware revision
     as str or bytes (str.decode() raised AttributeError), and stop before
     downloading or writing firmware, which a simulated Drobo cannot take.
+  * fix SetOptions(): write back the unit's current flags byte at +6 of
+    sub-page 0x30 (OptionsFlags from the dict, else read with GetOptions)
+    instead of 0, which could switch off use unprotected capacity / data
+    check settings on newer units when a threshold was set.  Units without
+    that byte get the same bytes as before; the flags stay read only.
 
 0.6.2.2: 2010/02/06
 -------------------
