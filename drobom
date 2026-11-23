@@ -304,9 +304,10 @@ def printstatus(d):
     m = ':'.join(d.DiscoverMounts())
     if m == "":
         m = "-"
-    if n[2] == "":
-        n[2] = "-"
-    print("%s %s %s %02d%% full - %s" % ( ':'.join(d.char_devs), m, n[2], \
+    name = n[2]
+    if name == "":
+        name = "-"
+    print("%s %s %s %02d%% full - %s" % ( ':'.join(d.char_devs), m, name, \
          pfull, d.GetSubPageStatus() ))
 
 

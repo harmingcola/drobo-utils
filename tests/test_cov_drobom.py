@@ -362,14 +362,17 @@ class TestSimpleCommands(DrobomTestCase):
         self.assertEqual(r.out,
                          '/dev/sdz /drmnt0:/drmnt2 TRUSTED DATA 25% full - ([], 0)\n')
 
-    @unittest.expectedFailure
     def test_status_unnamed_drobo(self):
-        """ BUG: an empty name is replaced with n[2] = "-", but the settings
-            are a tuple, so this raises TypeError. """
+        """ an empty name is shown as '-' (n[2] = "-" used to assign into
+            the settings tuple: TypeError.) """
         with mock.patch.object(Drobo.Drobo, 'GetSubPageSettings',
-                               return_value=(1220112079, 8, '')):
+                               return_value=(1220112079, 8, '')), \
+             mock.patch.object(Drobo.Drobo, 'GetSubPageCapacity',
+                               return_value=(750, 249, 1000, 0)), \
+             mock.patch.object(Drobo.Drobo, 'GetSubPageStatus',
+                               return_value=([], 0)):
             r = self.drobom(*SIM, *ONE, 'status')
-        self.assertRegex(r.out, r'^/dev/sdz /drmnt0:/drmnt2 - ')
+        self.assertEqual(r.out, '/dev/sdz /drmnt0:/drmnt2 - 25% full - ([], 0)\n')
 
     def test_status_real_device(self):
         with self.device(FakeDevice()):
