@@ -532,6 +532,7 @@ class Drobo:
         if DEBUG & DBG_Simulation:
             self.GetSubPageFirmware() \
             #for the side effect, self.fw & self.features get set
+            self.GetSubPageConfig()  # side effect: sets self.slot_count
 
         else:
             self.fd = DroboIOctl.DroboIOctl(self.char_dev_file, 0, debugflags)

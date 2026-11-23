@@ -128,6 +128,9 @@ unreleased
     settings tuple raised TypeError.
   * fix drobom view without PyQt5: print the hint and exit with status 1,
     instead of carrying on and failing with an ImportError traceback.
+  * fix simulation (-v 128): the constructor reads the simulated config,
+    as on hardware, so slot_count is set and drobom -v 129 info slots on
+    its own no longer raises AttributeError.
 
 0.6.2.2: 2010/02/06
 -------------------
