@@ -234,11 +234,92 @@ def _unitstatus(n):
         f.append('Fan failed')
     if (n & 0x800000):
         f.append('Fan missing')
+    if (n & 0x2000000):  # named by ReDrobo
+        f.append('Hybrid tiering state')
     if (n & 0x10000000
         ):  # was going to say 'Let us pray...', but no need to alarm people.
         f.append('Unknown error')
 
     return f
+
+
+# names of status bits above bit 31, as published by the ReDrobo project
+# (from the vendor's AlertMailer::GetEventIDForStatus.)  The vendor treats
+# status as 64 bits wide, but sub-page 0x09 only gives drobo-utils 32 bits:
+# where the high word would come from is unknown (the 24 byte record's extra
+# word is NOT assumed to be it.)
+_STATUS_HIGH_BITS = ((32, 'DroboShare alert'), (33, 'Drive added'),
+                     (34, 'Drive removed'),
+                     (35, 'Dual disk redundancy updated'),
+                     (36, 'Volume usage over limit'),
+                     (37, 'All volumes over limit'), (38, 'Target login'),
+                     (39, 'Relayout complete'),
+                     (41, 'Three SSDs and a disk required'))
+
+
+def _unitstatus64(n):
+    """ names for a 64 bit unit status: _unitstatus of the low word, then the
+        named bits of the high word, in bit order.  Nothing reads a 64 bit
+        status yet; this is for when a source of one is found.
+    """
+    f = _unitstatus(n & 0xffffffff)
+    f.extend(name for bit, name in _STATUS_HIGH_BITS if n & (1 << bit))
+    return f
+
+
+# status severity, the vendor's own rule (getSeverityForStatus, as published
+# by the ReDrobo project): any bit of the red mask, tested 32 bits wide, is
+# red; otherwise any bit of the yellow mask, tested 64 bits wide, is yellow;
+# otherwise green.  With a 32 bit status only the low word of the yellow mask
+# applies.  Bits 15 and 17, set on a healthy unit, are in neither mask.
+_SEVERITY_RED = 0x14c4187a
+_SEVERITY_YELLOW = 0x36002300244
+
+
+def _statusseverity(status):
+    """ 'red', 'yellow' or 'green' for a numeric unit status (32 or 64 bits.)
+    """
+    if status & 0xffffffff & _SEVERITY_RED:
+        return 'red'
+    if status & _SEVERITY_YELLOW:
+        return 'yellow'
+    return 'green'
+
+
+# redundancy level, derived from capacities as the ReDrobo project describes
+# (the unit does not report it): BeyondRAID holds back the largest disk for
+# single disk redundancy and the two largest for dual.  The held back space
+# also carries some overhead (0.5% of it on ReDrobo's 5D), so the ratio is
+# accepted within this window round 1.0.  The two hypotheses are at least a
+# factor of (1 + second largest / largest) apart, 2 for equal disks, so 5%
+# leaves room for overhead without confusing them.
+_REDUNDANCY_WINDOW = 0.05
+
+
+def _redundancylevel(capacities, usable):
+    """ 'single', 'dual' or 'undetermined', given the raw capacities of the
+        installed disks (bytes; empty slots as 0, accelerator excluded) and
+        the usable protected total (bytes.)
+
+        held back = sum(capacities) - usable.  single if held back / largest
+        is within _REDUNDANCY_WINDOW of 1, dual if held back / (two largest)
+        is; undetermined if neither or both fit, or the figures make no sense.
+    """
+    caps = sorted((c for c in capacities if c), reverse=True)
+    if not caps or not usable or usable <= 0:
+        return 'undetermined'
+    held = sum(caps) - usable
+    if held <= 0:
+        return 'undetermined'
+
+    def fits(ratio):
+        return abs(ratio - 1.0) <= _REDUNDANCY_WINDOW
+
+    single = fits(held / caps[0])
+    dual = len(caps) >= 2 and fits(held / (caps[0] + caps[1]))
+    if single != dual:
+        return 'single' if single else 'dual'
+    return 'undetermined'
 
 
 def _partformat(n):
@@ -1541,6 +1622,10 @@ class Drobo:
           diskpack_status - disk pack status, or None on older firmware
           double_degraded - double degraded count, or None on older firmware
           extra           - a further u32 of unknown meaning, or None
+          severity        - 'red', 'yellow' or 'green', by the vendor's
+                            rule (_statusseverity) applied to the status
+                            bits and the bits the disk pack status implies,
+                            so it agrees with the flags.  extra is not used.
 
         Newer firmware returns 16, 20 or 24 bytes of status instead of 12.
         Like the vendor's software, disk pack status 2..8 is folded into the
@@ -1552,7 +1637,8 @@ class Drobo:
         if DEBUG & DBG_Simulation:
             return {'status': 0x0240, 'flags': _unitstatus(0x0240),
                     'relayout_count': 1250000, 'diskpack_status': 1,
-                    'double_degraded': 0, 'extra': None}
+                    'double_degraded': 0, 'extra': None,
+                    'severity': _statusseverity(0x0240)}
 
         body = self.__getsubpage_raw(0x09, 20)
         n = len(body) // 4
@@ -1565,7 +1651,8 @@ class Drobo:
                    6: 0x0020, 7: 0x0020, 8: 0x40000}.get(diskpack, 0)
         return {'status': status, 'flags': _unitstatus(status | implied),
                 'relayout_count': relayout, 'diskpack_status': diskpack,
-                'double_degraded': dd, 'extra': extra}
+                'double_degraded': dd, 'extra': extra,
+                'severity': _statusseverity(status | implied)}
 
     def GetSlotInfo2(self):
         """ per-drive details, from sub-page 0x35 (newer firmware.)  returns a
@@ -1633,6 +1720,34 @@ class Drobo:
             slots[-1]['rpm'] = _driverpm(f[7])
             off += stride
         return slots
+
+    def GetRedundancyLevel(self):
+        """ 'single', 'dual' or 'undetermined': the disk redundancy level,
+        which the unit does not report, derived from capacities (see
+        _redundancylevel.)  Disk capacities come from GetSlotInfo2
+        (sub-page 0x35), leaving out an mSATA accelerator slot, or from
+        GetSubPageSlotInfo (0x03) on firmware without 0x35 (those units have
+        no accelerator); the usable protected total from GetSubPageCapacity.
+
+        STATUS: rule from ReDrobo, checked on one Drobo 5D there; untested
+        here on hardware.
+        """
+        if DEBUG & DBG_Simulation:
+            slots = Drobo.GetSlotInfo2(self)
+            usable = Drobo.GetSubPageCapacity(self)[2]
+            return _redundancylevel([s['total_capacity'] for s in slots],
+                                    usable)
+        try:
+            slots = self.GetSlotInfo2()
+            if slots is None:
+                caps = [s[1] for s in self.GetSubPageSlotInfo()]
+            else:
+                caps = [s['total_capacity'] for s in slots
+                        if s['interface'] != 'mSATA']
+            usable = self.GetSubPageCapacity()[2]
+        except (DroboException, IOError, struct.error):
+            return 'undetermined'
+        return _redundancylevel(caps, usable)
 
     # system operations (0xEA) this module may send as reads.  Others exist
     # (firmware download, standby, power off, ...): never add one here without

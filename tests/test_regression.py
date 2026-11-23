@@ -82,7 +82,11 @@ FIXTURE_FIELDS[0x03] = _slot_fields()
 
 
 def legacy_subpage(sub_page):
-    """ bytes of a sub-page, as returned by a first generation Drobo. """
+    """ bytes of a sub-page, as returned by a first generation Drobo.  A
+        sub-page it does not have fails the way an unsupported page does on
+        a real unit (DroboIOctl raises IOError.) """
+    if sub_page not in FIXTURE_FIELDS:
+        raise IOError("io_hdr status is: 2")  # unsupported page
     pattern, fields = FIXTURE_FIELDS[sub_page]
     body = struct.pack('>' + pattern, *fields)
     return struct.pack('>BBH', 0x7a, sub_page, len(body)) + body

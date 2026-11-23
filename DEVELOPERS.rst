@@ -337,12 +337,53 @@ USB 3 era units:
 Protocol Notes: facts from ReDrobo
 ----------------------------------
 
-ReDrobo (https://github.com/fetzu/ReDrobo, MIT licence) is a macOS client
-for USB Drobos.  Its docs/PROTOCOL.md decodes record layouts from the
-vendor's own service (DDService64d) and checks them against a live Drobo 5D
-on firmware 4.2.3 and the vendor's Dashboard.  drobo-utils uses the facts
-below from it; the code here is its own.  None of it is tested on hardware
-here.
+The ReDrobo project (https://github.com/fetzu/ReDrobo, MIT licence) publishes
+a protocol write-up, docs/PROTOCOL.md, checked against a live Drobo 5D
+(firmware 4.2.3) and the vendor's Dashboard.  drobo-utils uses the facts
+below from it; the code is our own.
+
+ * Status severity (GetStatusEx()['severity'], _statusseverity, shown by
+   drobom info health).  The vendor's own rule, from its
+   getSeverityForStatus: red if status & 0x14c4187a (tested 32 bits wide),
+   else yellow if status & 0x36002300244 (tested 64 bits wide), else green.
+   Our status is a u32 from sub-page 0x09, so only the low word of the
+   yellow mask (0x02300244) can apply.  A healthy 5D reports 0x00028000:
+   bits 15 and 17 are set when healthy, are in neither mask and are not
+   alerts (their meaning is unknown), so it is green.  The severity is taken
+   over the status bits plus the bits the disk pack status implies, so it
+   agrees with the flags; the 24 byte record's extra word is not used.
+
+ * Status bit names (from the vendor's AlertMailer::GetEventIDForStatus).
+   Within 32 bits, bit 25 (0x2000000) is 'Hybrid tiering state', now named
+   by _unitstatus (after the fan bits, before 'Unknown error').  Above 32
+   bits: 32 DroboShare alert, 33 drive added, 34 drive removed, 35 dual
+   disk redundancy updated, 36 volume usage over limit, 37 all volumes over
+   limit, 38 target login, 39 relayout complete, 41 three SSDs and a disk
+   required.  These are named by _unitstatus64, which nothing calls yet: no
+   source of a 64 bit status is known, and the 24 byte record's extra word
+   is NOT assumed to be the high word.  Bits 15 and 17 (set when healthy)
+   are deliberately left unnamed, so they never show up as alert flags.
+
+ * Redundancy level (GetRedundancyLevel, _redundancylevel, shown by drobom
+   info health as 'Redundancy level: single/dual/undetermined').  The unit
+   does not report it (ReDrobo found sub-page 0x11 all zeros on a 5D), but
+   BeyondRAID holds back the largest disk for single redundancy and the two
+   largest for dual, so: held back = raw installed (sum of the disk
+   capacities, without an mSATA accelerator slot) minus the usable
+   protected total (GetSubPageCapacity()[2]).  Single if held back /
+   largest is within 5% of 1.0, dual if held back / (two largest) is,
+   undetermined if neither or both fit (both can only fit when the second
+   largest disk is tiny), or if there is no usable capacity.  ReDrobo's 5D
+   (2/2/4/2/4 TB, usable 5 962 106 142 720 bytes) gives 1.0049 for dual and
+   2.0098 for single, and its owner confirmed dual.  The window: the excess
+   over 1.0 is overhead (0.5% of the held back space there; relatively more
+   on arrays whose held back disks are small next to the whole), while the
+   two hypotheses differ by a factor of 1 + second largest / largest (2 for
+   equal disks), so 5% tolerates the overhead without confusing them.
+   Capacities come from sub-page 0x35, where disk type 4 (mSATA) marks the
+   accelerator, or from 0x03 on firmware without 0x35 (no accelerator
+   there).  Confirmed on one enclosure only (ReDrobo's own validation
+   table still lists the derivation as open).
 
  * Capacity, sub-page 0x02, is seven big endian u64 on newer firmware (page
    length 0x38): protected free, used and total, unprotected total, then
