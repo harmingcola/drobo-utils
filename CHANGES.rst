@@ -105,6 +105,8 @@ unreleased
   * fix PickFirmware() for .tdz archives: decode the INQUIRY hardware
     revision before matching it against the member names; the int from the
     bytes never matched, so no firmware was ever picked from a .tdz.
+  * fix PickFirmware() for .tdf files: read the image in binary mode; text
+    mode failed to decode binary firmware or mangled its line endings.
 
 0.6.2.2: 2010/02/06
 -------------------
