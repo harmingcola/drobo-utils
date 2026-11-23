@@ -107,6 +107,8 @@ unreleased
     bytes never matched, so no firmware was ever picked from a .tdz.
   * fix PickFirmware() for .tdf files: read the image in binary mode; text
     mode failed to decode binary firmware or mangled its line endings.
+  * fix downloadFirmware(): write the local copy in binary mode; writing the
+    downloaded bytes to a text file raised TypeError (fwupgrade).
 
 0.6.2.2: 2010/02/06
 -------------------

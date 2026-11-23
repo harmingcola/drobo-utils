@@ -367,32 +367,22 @@ class TestDownloadFirmware(CovTestCase):
         self.fake = mock.Mock(return_value=io.BytesIO(self.fw))
         return mock.patch.object(urllib.request, 'urlopen', self.fake)
 
-    def binary_writes(self):
-        """ work around the text mode write bug below. """
-        real_open = builtins.open
-        tmp = self.tmp.name
+    def temp_writes_only(self):
+        """ open() inside Drobo.py may only touch the temp dir. """
+        return self.redirect_open({})
 
-        def fake_open(path, mode='r', *a, **k):
-            if not os.path.abspath(path).startswith(tmp + os.sep):
-                raise AssertionError('open outside temp dir: %s' % path)
-            return real_open(path, mode.replace('w+', 'wb+'), *a, **k)
-
-        return mock.patch.object(Drobo, 'open', fake_open, create=True)
-
-    # BUG: the downloaded bytes are written to a file opened in text mode
-    # ('w+'), which raises TypeError under Python 3, so no firmware can be
-    # downloaded.
-    @unittest.expectedFailure
+    # the downloaded bytes used to be written to a file opened in text mode
+    # ('w+'), which raised TypeError, so no firmware could be downloaded.
     def test_download_plain(self):
         local = self.path('local.tdf')
-        with self.urlopen():
+        with self.urlopen(), self.temp_writes_only():
             self.assertEqual(self.d.downloadFirmware('fw/x.tdf', local),
                              self.fw)
 
-    def test_download_plain_past_text_mode_bug(self):
+    def test_download_plain_traced_and_written(self):
         local = self.path('local.tdf')
         self.debug(Drobo.DBG_Chatty)
-        with self.urlopen(), self.binary_writes(), self.stdout() as out:
+        with self.urlopen(), self.temp_writes_only(), self.stdout() as out:
             data = self.d.downloadFirmware('fw/x.tdf', local)
         self.assertEqual(data, self.fw)
         self.assertEqual(self.d.fwdata, self.fw)
@@ -404,7 +394,7 @@ class TestDownloadFirmware(CovTestCase):
                      'local copy written', 'downloading done '):
             self.assertIn(line, out)
 
-    def test_download_zipped_past_text_mode_bug(self):
+    def test_download_zipped(self):
         """ a .tdz is handed to PickFirmware, which sets fwdata. """
         local = self.path('local.tdz')
 
@@ -412,7 +402,7 @@ class TestDownloadFirmware(CovTestCase):
             self.d.fwdata = b'picked'
             return 1
 
-        with self.urlopen(), self.binary_writes(), \
+        with self.urlopen(), self.temp_writes_only(), \
              mock.patch.object(self.d, 'PickFirmware', side_effect=pick) as p:
             self.assertEqual(self.d.downloadFirmware('fw/x.tdz', local),
                              b'picked')
