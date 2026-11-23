@@ -501,6 +501,9 @@ class Drobo:
         # 'dbd': page follows a mode parameter header (Drobo S Gen 2, USB 3)
         self.mode_sense_style = 'legacy'
 
+        # set when the unit refuses sub-page 0x07 (see GetSubPageLUNs)
+        self.luninfo2_refused = False
+
         if DEBUG & DBG_Simulation:
             self.GetSubPageFirmware() \
             #for the side effect, self.fw & self.features get set
@@ -1455,6 +1458,9 @@ class Drobo:
                 ... ]
 
          *only returned if firmware: SUPPORTS_NEW_LUNINFO2 (essentially >=1.1.0)
+          and the unit answers sub-page 0x07 (LUNINFO2.)  If it refuses
+          (I/O error or no valid page), the LUNINFO (0x04) tuples are
+          returned instead, and 0x07 is not asked again by this object.
 
       STATUS: works, with worries and omissions:
 
@@ -1474,17 +1480,26 @@ class Drobo:
         lp = "HBQQ"
         l = self.__getsubpage(0x04, 'B' + lp * 8)
 
-        if ('SUPPORTS_NEW_LUNINFO2' in self.features):
+        use2 = ('SUPPORTS_NEW_LUNINFO2' in self.features) and \
+            not getattr(self, 'luninfo2_refused', False)
+        if use2:
             # must ensure li2 fields have correct count.
             li2fieldcount = 10
             li2 = "HBQBBBH3B"
-            l2 = self.__getsubpage(0x07, "B" + li2 * 8)
+            try:
+                l2 = self.__getsubpage(0x07, "B" + li2 * 8)
+            except (IOError, DroboException):
+                # newer units may refuse 0x07 (it is not in the vendor's Mac
+                # driver dispatch table, per ReDrobo): use 0x04 alone, and
+                # do not ask again.
+                self.luninfo2_refused = True
+                use2 = False
 
         i = 0
         li = []
         while (i < l[0]):
             j = i * 4
-            if ('SUPPORTS_NEW_LUNINFO2' in self.features):
+            if use2:
                 k = 1 + i * li2fieldcount
 
                 # sanity check, in case I ever get out of sync again...

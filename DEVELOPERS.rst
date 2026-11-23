@@ -434,6 +434,13 @@ below from it; the code is our own.
    under 'Accelerator (mSATA cache, not a drive bay):'.  An SSD in a bay
    (type 2 or 3) stays a bay.
 
+ * LUN info 2, sub-page 0x07, is absent from the dispatch table of the
+   vendor's Mac driver, so newer units should be expected to refuse it even
+   when the firmware sets SUPPORTS_NEW_LUNINFO2.  GetSubPageLUNs() then
+   returns the LUNINFO (0x04) tuples (LUN id, total, used) instead of
+   failing, sets Drobo.luninfo2_refused and does not ask for 0x07 again.
+   A refused 0x04 still raises.
+
 
 Making a Release
 ----------------
