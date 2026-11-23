@@ -82,6 +82,8 @@ unreleased
     ReDrobo describes: GetRedundancyLevel(), shown by drobom info health.
   * fix DroboIOctl.version(): a failing SG_GET_VERSION_NUM printed its
     warning via an undefined name, so it raised NameError instead.
+  * fix get_sub_page(): the sense buffer length was set on the wrong object,
+    so the kernel was told it was 0 bytes and returned no sense data.
 
 0.6.2.2: 2010/02/06
 -------------------

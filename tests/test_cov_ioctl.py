@@ -390,7 +390,7 @@ class TestGetSubPage(unittest.TestCase):
         result, out = call(fio, dio.get_sub_page, 2, MODE_SENSE_3A_01, 0, 0)
         self.assertEqual(result, b'\x7a\x01')
         self.assertIn('mcb 000:\n5a 00 3a 01 00 00 00 00 14 00 \n', out)
-        self.assertIn('4 before ioctl, sense_buffer_len= 0\n', out)
+        self.assertIn('4 before ioctl, sense_buffer_len= 64\n', out)
         self.assertIn('5 after ioctl, result=0 status: 0 driver_status: 0 '
                       'host_status: 0 sb_len_wr: 0 resid: 0\n', out)
         self.assertIn('page_buffer 000:\n7a 01 \n', out)
@@ -410,22 +410,15 @@ class TestGetSubPage(unittest.TestCase):
         _, out = call(fio, dio.get_sub_page, 2, MODE_SENSE_3A_01, 0, 0)
         self.assertEqual(out, '')
 
-    # BUG: get_sub_page sets self.mx_sb_len instead of io_hdr.mx_sb_len, so
-    # the sg driver is told the sense buffer is 0 bytes long and never
-    # returns sense data on CHECK CONDITION.
-    @unittest.expectedFailure
+    # get_sub_page used to set self.mx_sb_len instead of io_hdr.mx_sb_len,
+    # so the sg driver was told the sense buffer is 0 bytes long and never
+    # returned sense data on CHECK CONDITION.
     def test_sense_buffer_length_passed_to_driver(self):
         fio = FakeIoctl(data=b'ok')
         dio = open_dev(debugflags=0)
         call(fio, dio.get_sub_page, 2, MODE_SENSE_3A_01, 0, 0)
         self.assertEqual(fio.calls[0]['mx_sb_len'], 64)
-
-    def test_sense_buffer_length_currently_zero(self):
-        fio = FakeIoctl(data=b'ok')
-        dio = open_dev(debugflags=0)
-        call(fio, dio.get_sub_page, 2, MODE_SENSE_3A_01, 0, 0)
-        self.assertEqual(fio.calls[0]['mx_sb_len'], 0)
-        self.assertEqual(dio.mx_sb_len, 64)
+        self.assertFalse(hasattr(dio, 'mx_sb_len'))
 
 
 # --- put_sub_page ---------------------------------------------------------------
