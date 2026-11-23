@@ -361,12 +361,16 @@ class TestSetOptions(DroboCase):
         # the v1 page has already gone out by then.
         self.assertEqual(self.dev.puts, [(V1_CDB, v1_buffer(1, 2))])
 
-    def test_simulation_still_calls_put_sub_page(self):
-        """ SetOptions has no simulation guard. """
+    def test_simulation_sends_nothing(self):
+        """ in simulation SetOptions writes nothing, with or without
+            OPTIONS2 (it used to have no simulation guard.) """
         self.debug(Drobo.DBG_Simulation)
-        self.d.features = []
-        self.d.SetOptions(options())
-        self.assertEqual(len(self.dev.puts), 1)
+        for features in ([], self.d.features):
+            with self.subTest(features=features):
+                self.d.features = features
+                self.d.SetOptions(options())
+                self.assertEqual(self.dev.puts, [])
+                self.assertEqual(self.dev.cdbs, [])
 
     def test_set_options_sends_no_query_and_no_transaction(self):
         """ with OptionsFlags in the dict (as GetOptions returns it),
@@ -408,6 +412,13 @@ class TestSetLunSize(DroboCase):
                          [b'\0\0\0\x02', b'\xff\xff\xff\xff'])
         # second command carries the next transaction id.
         self.assertEqual(self.dev.puts[1][0][5], 8)
+
+    def test_simulation_sends_nothing(self):
+        self.debug(Drobo.DBG_Simulation)
+        with mock.patch.object(self.d, 'umount', return_value=True):
+            self.d.SetLunSize(16)
+        self.assertEqual(self.dev.puts, [])
+        self.assertEqual(self.dev.cdbs, [])
 
     def test_umount_failure_sends_nothing(self):
         with mock.patch.object(self.d, 'umount', return_value=False):
