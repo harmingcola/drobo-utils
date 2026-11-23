@@ -201,6 +201,8 @@ def printscsi(d):
               (s[8].decode(), s[9].decode(), s[10].decode()))
     else:
         print(str((s[8], s[9], s[10])))
+    if Drobo.DEBUG & Drobo.DBG_Simulation:  # no device to ask
+        return
     for c in d.char_devs:
         dio = DroboIOctl.DroboIOctl(c, 0, Drobo.DEBUG)
         version = dio.version()

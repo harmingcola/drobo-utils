@@ -533,6 +533,7 @@ class Drobo:
             self.GetSubPageFirmware() \
             #for the side effect, self.fw & self.features get set
             self.GetSubPageConfig()  # side effect: sets self.slot_count
+            self.inquiry = self.inquire()
 
         else:
             self.fd = DroboIOctl.DroboIOctl(self.char_dev_file, 0, debugflags)
@@ -1079,6 +1080,9 @@ class Drobo:
             28-31  dev. type params.
 
     """
+        if DEBUG & DBG_Simulation:  # a Drobo v1's answer, DroboPro length
+            return (0, ) * 8 + (b'TRUSTED ', b'Mass Storage    ', b'1.00')
+
         dpropack = '>BBBBBBBB8s16s4s'
         mypack = dpropack + '20sBB8HH'
         paklen = struct.calcsize(mypack)
