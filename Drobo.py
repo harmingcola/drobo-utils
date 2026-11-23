@@ -978,7 +978,7 @@ class Drobo:
         n = time.gmtime()
 
         dfname = "/tmp/DroboDiag_%d_%02d%02d_%02d%02d%02d.log" % (n[0:6])
-        df = open(dfname, "w")
+        df = open(dfname, "wb")
         d = self.GetDiagRecord(4)
         df.write(d)
         d = self.GetDiagRecord(7)

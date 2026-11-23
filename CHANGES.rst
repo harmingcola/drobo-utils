@@ -93,6 +93,9 @@ unreleased
   * fix Sync() and SetOptions(): the mode select sub-page header gives the
     big endian payload length (38, 9 and 19 bytes) instead of the native
     struct size (42, 18 and 33 on 64-bit).  No other byte changes.
+  * fix dumpDiagnostics(): write the file in binary mode; writing the
+    records' bytes to a text file raised TypeError, breaking drobom diag
+    and the GUI Diagnostics button.
 
 0.6.2.2: 2010/02/06
 -------------------

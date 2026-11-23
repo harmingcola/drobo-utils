@@ -632,29 +632,34 @@ class TestDumpDiagnostics(DroboCase):
             return {4: rec4, 7: rec7}[c[3]]
         self.dev.ea_reply = reply
 
-    @unittest.expectedFailure
     def test_dump_writes_both_records(self):
-        # BUG: the file is opened in text mode ("w") but GetDiagRecord
-        # returns bytes (as DroboIOctl.get_sub_page does), so write()
-        # raises TypeError. `drobom diag` and the GUI button both fail.
+        """ GetDiagRecord returns bytes (as DroboIOctl.get_sub_page does);
+            they go to the file unchanged. (The file used to be opened in
+            text mode, so write() raised TypeError and `drobom diag` and
+            the GUI button both failed.) """
         self.records(b'\x81\x82four', b'\x83seven')
         self.assertEqual(self.d.dumpDiagnostics(), DIAG_PATH)
         with open(self.local(), 'rb') as f:
             self.assertEqual(f.read(), b'\x81\x82four\x83seven')
 
-    def test_dump_with_bytes_currently_raises_type_error(self):
+    def test_dump_opens_the_file_in_binary_mode(self):
         self.records(b'four', b'seven')
-        with self.assertRaises(TypeError):
-            self.d.dumpDiagnostics()
-        self.assertEqual(self.opened, [(DIAG_PATH, ('w',))])
+        self.d.dumpDiagnostics()
+        self.assertEqual(self.opened, [(DIAG_PATH, ('wb',))])
+
+    def test_dump_keeps_carriage_returns_and_every_byte_value(self):
+        rec = bytes(range(256))
+        self.records(rec, b'\r\n\r')
+        self.d.dumpDiagnostics()
+        with open(self.local(), 'rb') as f:
+            self.assertEqual(f.read(), rec + b'\r\n\r')
 
     def test_dump_file_name_order_and_transaction(self):
-        """ with records the text mode file accepts (str), pin the rest:
-            the name, record 4 then 7, one transaction step at the end. """
-        self.records('four|', 'seven')
+        """ the name, record 4 then 7, one transaction step at the end. """
+        self.records(b'four|', b'seven')
         self.assertEqual(self.d.dumpDiagnostics(), DIAG_PATH)
-        with open(self.local()) as f:
-            self.assertEqual(f.read(), 'four|seven')
+        with open(self.local(), 'rb') as f:
+            self.assertEqual(f.read(), b'four|seven')
         self.assertEqual([c for c, sz, out in self.dev.ea],
                          [diag_first(4, 7), diag_first(7, 7)])
         self.assertEqual(self.d.transactionID, 8)
