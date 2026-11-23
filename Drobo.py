@@ -1275,11 +1275,14 @@ class Drobo:
             os.mkdir(Drobo.localfwrepository)
 
         fwname = fwpath.split('/')
-        hwlevel = hwlevel.decode()
+        if isinstance(hwlevel, bytes):  # INQUIRY revision; str in simulation
+            hwlevel = hwlevel.decode()
         localfw = Drobo.localfwrepository + '/' + fwarch + '_' + hwlevel + '_' + fwname[
             -1]
         if (DEBUG & DBG_Chatty):
             print('looking for: %s' % localfw)
+        if DEBUG & DBG_Simulation:  # no download, nothing to write
+            return 0
         if not os.path.exists(localfw):
             if (DEBUG & DBG_Chatty):
                 print('not present, fetching from drobo.com')
