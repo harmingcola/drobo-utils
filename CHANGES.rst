@@ -52,6 +52,8 @@ unreleased
     partially failed, fan failed, fan missing.
   * add hardware-free regression tests (make test.)
   * DEVELOPERS: protocol notes for the Drobo S Gen 2.
+  * status severity (red/yellow/green, the vendor's rule as published by
+    ReDrobo): GetStatusEx()['severity'], shown by drobom info health.
 
 0.6.2.2: 2010/02/06
 -------------------
