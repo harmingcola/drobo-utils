@@ -84,6 +84,9 @@ unreleased
     warning via an undefined name, so it raised NameError instead.
   * fix get_sub_page(): the sense buffer length was set on the wrong object,
     so the kernel was told it was 0 bytes and returned no sense data.
+  * fix identifyLUN(): decode the kernel's scsi_idlun (native dev_id) so
+    channel and id are no longer swapped, and host numbers above 127 are no
+    longer negative (drobom info config, -v 16 trace.)
 
 0.6.2.2: 2010/02/06
 -------------------

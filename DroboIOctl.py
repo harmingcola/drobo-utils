@@ -126,14 +126,21 @@ class DroboIOctl:
         SCSI_IOCTL_GET_IDLUN = 0x5382
         SCSI_IOCTL_GET_BUS_NUMBER = 0x5386
 
-        fmt = ">bbbbl"
+        # struct scsi_idlun { __u32 dev_id; __u32 host_unique_id; }, native
+        # byte order, filled by the kernel (drivers/scsi/scsi_ioctl.c) as
+        # dev_id = id | lun << 8 | channel << 16 | host_no << 24.
+        fmt = "=II"
         idlun = create_string_buffer(struct.calcsize(fmt))
         i = ioctl(self.sg_fd, SCSI_IOCTL_GET_IDLUN, idlun, True)
         if i < 0:
             print("Drobo get_mode_page SG_IO ioctl error")
             return None
 
-        (channel, lun, id, host, host_unique_id) = struct.unpack(fmt, idlun)
+        (dev_id, host_unique_id) = struct.unpack(fmt, idlun)
+        id = dev_id & 0xff
+        lun = (dev_id >> 8) & 0xff
+        channel = (dev_id >> 16) & 0xff
+        host = (dev_id >> 24) & 0xff
 
         #print "%s: scsi%d channel=%d id=%d lun=%d" % ( self.char_dev_file, host, \
         #      channel, id, lun )
