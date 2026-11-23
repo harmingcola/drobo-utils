@@ -76,6 +76,11 @@ Command is one of:
   the second and later runs also estimate the time left and when it will be
   done ("about 2 hours left", "done around 15:26").  The unit only reports the
   work left, so the estimate comes from how fast that falls since the first run.
+* *time*
+  print the Drobo's clock, then a 'Drobo clock:' line with the unit's own
+  wall clock and UTC offset (e.g. 2026-08-19 16:19:07 (UTC+02:00); 'UTC offset
+  unknown' when the unit's offset is not plausible, as on first generation
+  units).  The same line follows the time in the header of *info*.
 * *device*
   raw block device of a drobo (i.e. /dev/sdz) . If not given, assumes all attached drobos.
 * *view*

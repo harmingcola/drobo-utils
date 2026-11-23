@@ -50,6 +50,10 @@ unreleased
   * GetCapacityEx(): all seven fields of the capacity sub-page (0x02) on
     newer firmware (unprotected total, "PT" free/used/total); drobom info
     capacity shows them as extra lines.  Layout from ReDrobo.
+  * GetClock(): the unit's clock read as its local wall clock, with the
+    UTC offset decoded as minutes east (None when implausible, as on Gen 1);
+    drobom adds a 'Drobo clock' line to the info header and to drobom time.
+    GetSubPageSettings() is unchanged.  Facts from ReDrobo.
   * tests: more regression fixtures (LUN info, options, DroboPro inquiry.)
   * name status bits: incompatible disk pack, power supply missing, fan
     partially failed, fan failed, fan missing.

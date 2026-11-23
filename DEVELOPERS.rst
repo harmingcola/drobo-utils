@@ -394,6 +394,22 @@ below from it; the code is our own.
    with every record, bytes past the declared page length are stale buffer
    contents (on a 5D, fragments of its event log) and are ignored.
 
+ * Settings, sub-page 0x05: currentTime (u32 at +4) is the unit's LOCAL
+   wall clock, not UTC, and gmtOffset (u16 at +8) is minutes east of UTC
+   (120 is UTC+2).  ReDrobo saw a 5D read 16:19:07 when UTC was 14:19:08 on
+   a UTC+2 host.  This explains the "offset is screwed up" ERRATA in
+   GetSubPageSettings(), which still returns offset 8 whatever the unit
+   says, because the original author saw bytes reading 0x0800 on a first
+   generation unit.  GetClock() decodes it properly: the clock face is the
+   time formatted as UTC; the offset is read as a signed u16 and accepted
+   only within 14 hours either way (else None, as for those Gen 1 bytes);
+   real UTC is time minus offset.  drobom set time (Sync) writes the host's
+   UTC with offset 0, so units set by drobo-utils show UTC+00:00.  drobom
+   prints 'Drobo clock: YYYY-MM-DD HH:MM:SS (UTC+hh:mm)' under the info
+   header and from drobom time.  Gen 1 caveat: whether first generation
+   units use the same encoding is unknown; there, expect 'UTC offset
+   unknown'.
+
 
 Making a Release
 ----------------
