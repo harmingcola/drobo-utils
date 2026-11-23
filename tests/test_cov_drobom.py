@@ -498,13 +498,16 @@ class TestInfo(DrobomTestCase):
                       out)
         self.assertNotIn('Model', out)
 
-    @unittest.expectedFailure
     def test_slots_chatty_alone(self):
-        """ BUG (simulation only): a simulated Drobo has no slot_count until
-            GetSubPageConfig has run, so 'drobom -v 129 info slots' raises
-            AttributeError.  Hardware is unaffected: the constructor reads
-            the config there. """
-        self.assertIn('number of slots: 8', self.info('slots', chatty=True))
+        """ simulation: 'drobom -v 129 info slots' on its own.  (A simulated
+            Drobo used to have no slot_count until GetSubPageConfig had run,
+            so this raised AttributeError.  Hardware reads the config in the
+            constructor.) """
+        out = self.info('slots', chatty=True)
+        self.assertTrue(out.startswith(
+            'query slotinfo result:  number of slots: 8\n'
+            'slot   GB                Model               Status\n'), out)
+        self.assertEqual(len(out.splitlines()), 2 + 8)  # one line per slot
 
     def test_slots_chatty(self):
         out = self.info('config,slots', chatty=True)
