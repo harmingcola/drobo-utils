@@ -1034,23 +1034,16 @@ class TestView(DrobomTestCase):
         app.return_value.exec_.assert_called_once_with()
         self.assertEqual(r.out, '')
 
-    @unittest.expectedFailure
     def test_no_qt(self):
-        """ BUG: without PyQt5, drobom prints a hint but carries on, and
-            then fails importing DroboGUI (ImportError) instead of
-            stopping cleanly. """
+        """ without PyQt5, drobom prints a hint and exits with status 1.
+            (It used to carry on, and fail importing DroboGUI.) """
         with mock.patch.dict(sys.modules, {'PyQt5': None, 'DroboGUI': None}):
             r = self.drobom(*SIM, *ONE, 'view')
-        self.assertIn('QT support missing, no GUI possible', r.out)
-
-    def test_no_qt_prints_hint_then_fails(self):
-        """ pins current behaviour (see test_no_qt.) """
-        with mock.patch.dict(sys.modules, {'PyQt5': None, 'DroboGUI': None}), \
-             self.assertRaises(ImportError) as e:
-            self.drobom(*SIM, *ONE, 'view')
+        self.assertEqual(r.code, 1)
         self.assertEqual(
-            e.exception.drobom_out, 'QT support missing, no GUI possible\n'
+            r.out, 'QT support missing, no GUI possible\n'
             'perhaps following will help: apt-get install python3-qtpy\n')
+        self.assertEqual(r.err, '')
 
 
 if __name__ == '__main__':
