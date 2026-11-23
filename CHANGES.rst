@@ -47,6 +47,9 @@ unreleased
     operation 0x83, only on firmware advertising it), with per volume
     initiator names and addresses; drobom info volumes uses the best
     available source (GetLUNsInfoBest()).
+  * GetCapacityEx(): all seven fields of the capacity sub-page (0x02) on
+    newer firmware (unprotected total, "PT" free/used/total); drobom info
+    capacity shows them as extra lines.  Layout from ReDrobo.
   * tests: more regression fixtures (LUN info, options, DroboPro inquiry.)
   * name status bits: incompatible disk pack, power supply missing, fan
     partially failed, fan failed, fan missing.

@@ -140,6 +140,26 @@ def printcapacity(d):
     else:
         print(c)
 
+    # extra fields of newer firmware, only when the unit returns them.
+    try:
+        x = d.GetCapacityEx()
+    except (Drobo.DroboException, IOError):
+        return
+    extra = dict((k, x[k]) for k in ('unprotected_total', 'pt_free',
+                                     'pt_used', 'pt_total')
+                 if x.get(k) is not None)
+    if not extra:
+        return
+    if not Drobo.DEBUG & Drobo.DBG_Chatty:
+        print(extra)
+        return
+    if 'unprotected_total' in extra:
+        print('Unprotected capacity (in GB):  total: %d' %
+              togig(extra['unprotected_total']))
+    if 'pt_total' in extra:
+        print('PT capacity (in GB):  used: %d, free: %d, total: %d' % \
+              ( togig(x['pt_used']), togig(x['pt_free']), togig(x['pt_total'])))
+
 
 def printprotocol(d):
     protocol = d.GetSubPageProtocol()

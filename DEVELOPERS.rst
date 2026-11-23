@@ -385,6 +385,15 @@ below from it; the code is our own.
    there).  Confirmed on one enclosure only (ReDrobo's own validation
    table still lists the derivation as open).
 
+ * Capacity, sub-page 0x02, is seven big endian u64 on newer firmware (page
+   length 0x38): protected free, used and total, unprotected total, then
+   free, used and total of a "PT" set (meaning unknown.)  The first four are
+   what GetSubPageCapacity() has always read; GetCapacityEx() reads as many
+   fields as the unit returns, up to seven, and drobom info capacity shows
+   the unprotected total and the PT set as extra lines when present.  As
+   with every record, bytes past the declared page length are stale buffer
+   contents (on a 5D, fragments of its event log) and are ignored.
+
 
 Making a Release
 ----------------
