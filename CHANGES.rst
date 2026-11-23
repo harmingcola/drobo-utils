@@ -56,6 +56,8 @@ unreleased
     ReDrobo): GetStatusEx()['severity'], shown by drobom info health.
   * name status bit 25 (hybrid tiering state); _unitstatus64() names the
     bits above 31 that ReDrobo lists, for when a 64 bit status is found.
+  * redundancy level (single/dual/undetermined), derived from capacities as
+    ReDrobo describes: GetRedundancyLevel(), shown by drobom info health.
 
 0.6.2.2: 2010/02/06
 -------------------
