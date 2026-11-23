@@ -418,7 +418,7 @@ debug = 1
 
 try:
     opts, args = getopt.getopt(sys.argv[1:], "c:d:hns:v:Vy", \
-        ["command=", "device=", "help", "no", "string=", "verbose=", "verbosity=", "version", "y" ])
+        ["command=", "device=", "help", "no", "string=", "verbose=", "verbosity=", "version", "yes" ])
 except getopt.GetoptError as err:
     usage()
     sys.exit(2)
