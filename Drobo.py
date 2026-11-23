@@ -234,10 +234,36 @@ def _unitstatus(n):
         f.append('Fan failed')
     if (n & 0x800000):
         f.append('Fan missing')
+    if (n & 0x2000000):  # named by ReDrobo
+        f.append('Hybrid tiering state')
     if (n & 0x10000000
         ):  # was going to say 'Let us pray...', but no need to alarm people.
         f.append('Unknown error')
 
+    return f
+
+
+# names of status bits above bit 31, as published by the ReDrobo project
+# (from the vendor's AlertMailer::GetEventIDForStatus.)  The vendor treats
+# status as 64 bits wide, but sub-page 0x09 only gives drobo-utils 32 bits:
+# where the high word would come from is unknown (the 24 byte record's extra
+# word is NOT assumed to be it.)
+_STATUS_HIGH_BITS = ((32, 'DroboShare alert'), (33, 'Drive added'),
+                     (34, 'Drive removed'),
+                     (35, 'Dual disk redundancy updated'),
+                     (36, 'Volume usage over limit'),
+                     (37, 'All volumes over limit'), (38, 'Target login'),
+                     (39, 'Relayout complete'),
+                     (41, 'Three SSDs and a disk required'))
+
+
+def _unitstatus64(n):
+    """ names for a 64 bit unit status: _unitstatus of the low word, then the
+        named bits of the high word, in bit order.  Nothing reads a 64 bit
+        status yet; this is for when a source of one is found.
+    """
+    f = _unitstatus(n & 0xffffffff)
+    f.extend(name for bit, name in _STATUS_HIGH_BITS if n & (1 << bit))
     return f
 
 

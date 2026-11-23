@@ -353,6 +353,17 @@ below from it; the code is our own.
    over the status bits plus the bits the disk pack status implies, so it
    agrees with the flags; the 24 byte record's extra word is not used.
 
+ * Status bit names (from the vendor's AlertMailer::GetEventIDForStatus).
+   Within 32 bits, bit 25 (0x2000000) is 'Hybrid tiering state', now named
+   by _unitstatus (after the fan bits, before 'Unknown error').  Above 32
+   bits: 32 DroboShare alert, 33 drive added, 34 drive removed, 35 dual
+   disk redundancy updated, 36 volume usage over limit, 37 all volumes over
+   limit, 38 target login, 39 relayout complete, 41 three SSDs and a disk
+   required.  These are named by _unitstatus64, which nothing calls yet: no
+   source of a 64 bit status is known, and the 24 byte record's extra word
+   is NOT assumed to be the high word.  Bits 15 and 17 (set when healthy)
+   are deliberately left unnamed, so they never show up as alert flags.
+
 
 Making a Release
 ----------------
