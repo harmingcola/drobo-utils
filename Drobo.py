@@ -823,6 +823,9 @@ class Drobo:
         payloadlen = struct.calcsize(payload)
         if NewName == None:
             NewName = self.GetSubPageSettings()[2]
+        if isinstance(NewName, str):
+            # the 32s field needs bytes; struct truncates/pads to 32.
+            NewName = NewName.encode('ascii')
 
         buffer = struct.pack(">BBH" + payload, 0x7a, 0x05, payloadlen, now, 0,
                              NewName)
