@@ -20,6 +20,9 @@ import subprocess
 valid_print = ("config", "capacity", "protocol", "scsi", "slots", "firmware",
                "status", "options", "luns", "health", "drives", "volumes")
 
+# accepted by 'info', but not printed by default.
+optional_print = ("serial",)
+
 opt_str = ', '.join(valid_print)
 
 valid_formats = ("ext3", "ntfs", "msdos")
@@ -92,6 +95,7 @@ def usage():
     print("\t\t<options>\tcomma separated list of:")
     for line in textwrap.wrap(opt_str, 40):
         print("\t\t\t\t" + line)
+    print("\t\t\t\tand, only when asked for: " + ', '.join(optional_print))
     print("\tlist \tshow device files for all Drobos found.")
     print("\tset\t Set some Drobo thingum.")
     print("\t\tDualDiskRedundancy <True|False> \tSet option feature flag")
@@ -333,6 +337,16 @@ def printluns(d):
             print(i)
 
 
+def printserial(d):
+    """ the enclosure serial number: from the unit (sub-page 0x80), and from
+        the kernel's cached VPD page 0x80 in sysfs for each device. """
+    s = d.GetSerial()
+    print('Serial: %s' % (s or 'not reported by the unit'))
+    for c in d.char_devs:
+        print('VPD serial (%s): %s' % (c, Drobo.vpd_serial(c) or
+                                       'not available'))
+
+
 def printclock(d):
     """ the unit's own clock face and UTC offset (see Drobo.GetClock). """
     try:
@@ -351,11 +365,11 @@ def info(d, choices):
         print('---------------------------------------------------------')
 
     for c in choices:
-        if c in valid_print:
+        if c in valid_print or c in optional_print:
             eval("print" + c + "(d)")
         else:
             print('no such option: %s' % c)
-            print('valid options: ', opt_str)
+            print('valid options: ', opt_str + ', ' + ', '.join(optional_print))
 
     if debug & Drobo.DBG_Chatty:
         print('---------------------------------------------------------')

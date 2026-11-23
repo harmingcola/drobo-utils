@@ -222,10 +222,13 @@ Decoded from the Dashboard's product id to model name lookup:
   25      Drobo Mini                  45      Drobo 8i
   ======  ==========================  ======  ==========================
 
-drobo-utils does not use the serial yet: reading VPD pages over USB is not
+drobo-utils sends no INQUIRY for VPD pages: reading them over USB is not
 always safe (Linux usb-storage normally skips them), so it would need testing
 on real units first.  If the kernel did read it, it is in
-/sys/block/sdX/device/vpd_pg80.
+/sys/block/sdX/device/vpd_pg80, and Drobo.vpd_serial() reads that file (only
+that file); drobom info serial shows it.  The product id is not derived from
+the serial yet: whether "characters 8 to 10" above counts from 0 or 1 is not
+settled, and no real serial was at hand to check it against the table.
 
 
 Protocol Notes: Drobo S Gen 2 (USB 3)
@@ -440,6 +443,16 @@ below from it; the code is our own.
    returns the LUNINFO (0x04) tuples (LUN id, total, used) instead of
    failing, sets Drobo.luninfo2_refused and does not ask for 0x07 again.
    A refused 0x04 still raises.
+
+ * Device serial, sub-page 0x80: a 4 byte page header, then a 24 character
+   string.  The vendor's ESADeviceSerial::parse believes it only if it
+   starts with 'D', 'R', because the event messages record claims the same
+   sub-page.  A 5D on 4.2.3 refuses it.  GetSerial() reads it (a MODE SENSE,
+   with the variable length reader) and returns it if it starts with "DR",
+   else None; it is not read by the constructor or by default.  drobom
+   info serial (an optional choice, not in the default list) prints it,
+   then the VPD page 0x80 serial from sysfs for each device (see "How Drobos
+   identify themselves").
 
 
 Making a Release

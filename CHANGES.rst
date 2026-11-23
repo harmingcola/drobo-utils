@@ -66,6 +66,9 @@ unreleased
     instead of failing.
   * drobom info luns: no longer fails on units without LUNINFO2; '-' for
     the partition scheme and format there.
+  * GetSerial(): enclosure serial from sub-page 0x80 (only if it starts
+    with "DR"), vpd_serial(): the VPD page 0x80 serial the kernel cached in
+    sysfs; drobom info serial (optional, not printed by default).
   * tests: more regression fixtures (LUN info, options, DroboPro inquiry.)
   * name status bits: incompatible disk pack, power supply missing, fan
     partially failed, fan failed, fan missing.
