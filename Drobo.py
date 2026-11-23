@@ -1212,7 +1212,7 @@ class Drobo:
             print('header+body lengths validated.  Good.')
         #print self.fwhdr
 
-        if self.fwhdr[2] != 'TDIH':
+        if self.fwhdr[2] != b'TDIH':
             print('bad Magic, not a valid firmware')
             return 0
 
