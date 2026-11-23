@@ -734,5 +734,104 @@ class TestMainBlock(unittest.TestCase):
         self.assertTrue(text.endswith('hunt...\n[]\n'))
 
 
+
+# --- 0xEA vendor command framing on the wire ----------------------------------
+
+def wire_drobo(transaction_id=7):
+    """ a Drobo talking through the real DroboIOctl (ioctl faked per call),
+        so tests see the sg_io_hdr the kernel would get. """
+    d = Drobo.Drobo.__new__(Drobo.Drobo)
+    d.transactionID = transaction_id
+    d.fd = open_dev(debugflags=0)
+    return d
+
+
+class TestVendorCommandFraming(unittest.TestCase):
+    """
+      0xEA framing as the Drobo firmware reads it (static analysis of the
+      Drobo S 2.1.5 firmware, usbRbcEsaVendorUnique): CDB byte 2 bit 7 clear
+      means host to device, bit 7 set means device to host, and bytes 7-8
+      are the transfer length.  If the host's actual data phase disagrees
+      (e.g. a length of 1 but no data-out), the USB layer answers with a
+      phase error and the host must reset the device.  These tests pin that
+      every 0xEA command drobo-utils sends is well formed: SG direction and
+      dxfer_len agree with the CDB.
+    """
+
+    def sent(self, fn, fio=None):
+        fio = fio or FakeIoctl()
+        with mock.patch.object(DroboIOctl, 'ioctl', fio), \
+             redirect_stdout(io.StringIO()):
+            fn()
+        return [c for c in fio.calls if c['request'] == sg_io_hdr.SG_IO]
+
+    def assert_well_formed(self, call):
+        cdb = call['cdb']
+        self.assertEqual(cdb[0], 0xea)
+        self.assertEqual(len(cdb), 10)
+        length = struct.unpack('>H', cdb[7:9])[0]
+        self.assertEqual(call['dxfer_len'], length)
+        if cdb[2] & 0x80:
+            self.assertEqual(call['direction'], sg_io_hdr.SG_DXFER_FROM_DEV)
+        else:
+            self.assertEqual(call['direction'], sg_io_hdr.SG_DXFER_TO_DEV)
+            self.assertEqual(len(call.get('payload', b'')), length)
+
+    def check_one_zero_byte_out(self, fn, op):
+        """ Dashboard's form: ea 10 00 <op> 00 <txid> 20 00 01 00, then
+            exactly one 0x00 byte of data-out. """
+        def send():
+            # a malformed transfer may also upset the reply check; the
+            # framing is what is under test here.
+            try:
+                fn()
+            except Drobo.DroboException:
+                pass
+
+        calls = self.sent(send)
+        self.assertEqual(len(calls), 1)
+        c = calls[0]
+        self.assertEqual(c['cdb'], struct.pack('>BBBBBBBHB', 0xea, 0x10, 0x00,
+                                               op, 0x00, 7, 0x20, 1, 0x00))
+        self.assertEqual(c['direction'], sg_io_hdr.SG_DXFER_TO_DEV)
+        self.assertEqual(c['dxfer_len'], 1)
+        self.assertEqual(c.get('payload'), b'\x00')
+        self.assert_well_formed(c)
+
+    def test_blink_sends_one_zero_byte_to_device(self):
+        d = wire_drobo()
+        self.check_one_zero_byte_out(d.Blink, 0x06)
+        self.assertEqual(d.transactionID, 8)
+
+    def test_standby_sends_one_zero_byte_to_device(self):
+        d = wire_drobo()
+        with mock.patch.object(d, 'umount', return_value=True):
+            self.check_one_zero_byte_out(d.Standby, 0x0d)
+        self.assertEqual(d.transactionID, 8)
+
+    def test_blink_ioctl_failure_still_gives_sudo_hint(self):
+        d = wire_drobo()
+        out = io.StringIO()
+        with mock.patch.object(DroboIOctl, 'ioctl', FakeIoctl(result=-1)), \
+             redirect_stdout(out), self.assertRaises(SystemExit):
+            d.Blink()
+        self.assertIn('you need to be the super user', out.getvalue())
+        self.assertEqual(d.transactionID, 7)
+
+    def test_set_lun_size_is_well_formed(self):
+        d = wire_drobo()
+        with mock.patch.object(d, 'umount', return_value=True):
+            calls = self.sent(lambda: d.SetLunSize(4))
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]['payload'], struct.pack('>l', 4))
+        self.assert_well_formed(calls[0])
+
+    def test_diag_read_is_well_formed(self):
+        d = wire_drobo()
+        calls = self.sent(lambda: d.GetDiagRecord(4), FakeIoctl(resid=4096))
+        self.assertEqual(len(calls), 1)
+        self.assert_well_formed(calls[0])
+
+
 if __name__ == '__main__':
     unittest.main()

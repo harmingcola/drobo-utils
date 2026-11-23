@@ -792,6 +792,10 @@ class Drobo:
                                     0x00, self.transactionID, 0x01 << 5, 0x01,
                                     0x00)
 
+        # the CDB says host to device, length 1: get_sub_page with out=1
+        # sends its one byte, zeroed buffer as that data-out.  A mismatch
+        # (no data-out) is a USB phase error, and the host resets the unit.
+        # See "0xEA framing" in DEVELOPERS.rst.
         try:
             cmdout = self.fd.get_sub_page(1, modepageblock, 1, DEBUG)
 

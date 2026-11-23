@@ -145,6 +145,10 @@ unreleased
     write.  Missing fields are now written back as the unit reports them
     (sub-page 0x31, read before anything is written).  Units with iSCSI
     get the same bytes as before, with no extra read.
+  * tests: pin the blink/standby framing (0xEA with length 1 plus exactly
+    one 0x00 byte of data-out, as the vendor's software sends), and check
+    every 0xEA command's SG direction and length agree with its CDB.  No
+    change on the wire: drobo-utils already sends the byte.
 
 0.6.2.2: 2010/02/06
 -------------------
