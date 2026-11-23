@@ -301,6 +301,16 @@ class TestOptions(DrobomTestCase):
         sls.assert_called_once_with(1)
         self.assertIn('Done... Drobo is likely now rebooting.', r.out)
 
+    def test_unhandled_option_trips_assert(self):
+        """ the option loop's safety net: an option getopt returns but the
+            loop does not handle (as --y was, when declared as 'y') still
+            fails loudly. """
+        with mock.patch('getopt.getopt',
+                        return_value=([('--bogus', '')], ['list'])), \
+             self.assertRaises(AssertionError) as e:
+            self.drobom(*SIM, 'list')
+        self.assertEqual(str(e.exception), 'unhandled option')
+
     def test_unknown_command(self):
         r = self.drobom(*SIM, *ONE, 'bogus')
         self.assertEqual(r.code, FELL_THROUGH)
