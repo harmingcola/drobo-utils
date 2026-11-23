@@ -520,12 +520,13 @@ def kernel_idlun(host, channel, id, lun, unique=0):
 class TestIdentifyLUN(unittest.TestCase):
 
     def test_drobo_identity(self):
-        fio = FakeIoctl(idlun=bytes([1, 2, 3, 4]) + struct.pack('>l', 99),
+        fio = FakeIoctl(idlun=kernel_idlun(host=4, channel=3, id=1, lun=2,
+                                           unique=99),
                         inquiry=inquiry(b'TRUSTED', b'Mass Storage'))
         dio = open_dev(debugflags=0)
         result, out = call(fio, dio.identifyLUN)
-        # the idlun buffer is unpacked as channel, lun, id, host.
-        self.assertEqual(result, (4, 1, 3, 2, 'TRUSTED ', 'Mass Storage    '))
+        # (host, channel, id, lun, vendor, product)
+        self.assertEqual(result, (4, 3, 1, 2, 'TRUSTED ', 'Mass Storage    '))
         self.assertEqual(out, '')
         self.assertEqual(fio.calls[0]['request'], SCSI_IOCTL_GET_IDLUN)
         self.assertTrue(fio.calls[0]['mutate'])
@@ -541,20 +542,25 @@ class TestIdentifyLUN(unittest.TestCase):
         result, _ = call(fio, dio.identifyLUN)
         self.assertEqual(result[4:], ('USB 3.0 ', 'Drobo S - Gen 2 '))
 
-    # BUG: the kernel's scsi_idlun.dev_id is a native-endian u32 holding
-    # id | lun << 8 | channel << 16 | host << 24; on little endian machines
-    # identifyLUN unpacks those bytes as (channel, lun, id, host), so the
-    # channel and id it returns are swapped.  (Harmless for drobolunlist,
-    # which only compares the three together.)
-    @unittest.expectedFailure
+    # The kernel's scsi_idlun.dev_id is a native-endian u32 holding
+    # id | lun << 8 | channel << 16 | host << 24.  identifyLUN used to unpack
+    # its bytes as (channel, lun, id, host), so on little endian machines
+    # the channel and id it returned were swapped.
     def test_channel_and_id_from_kernel_layout(self):
-        if struct.pack('=I', 1)[0] != 1:
-            self.skipTest('little endian only')
         fio = FakeIoctl(idlun=kernel_idlun(host=3, channel=1, id=2, lun=0),
                         inquiry=inquiry(b'Drobo', b'5D'))
         dio = open_dev(debugflags=0)
         result, _ = call(fio, dio.identifyLUN)
         self.assertEqual(result[:4], (3, 1, 2, 0))
+
+    def test_host_numbers_above_127(self):
+        # every dev_id byte is unsigned (host_no counts up with each hotplug.)
+        fio = FakeIoctl(idlun=kernel_idlun(host=200, channel=129, id=255,
+                                           lun=128),
+                        inquiry=inquiry(b'Drobo', b'5D'))
+        dio = open_dev(debugflags=0)
+        result, _ = call(fio, dio.identifyLUN)
+        self.assertEqual(result[:4], (200, 129, 255, 128))
 
     def test_idlun_ioctl_error_returns_none(self):
         fio = FakeIoctl(result=-1)
@@ -656,6 +662,29 @@ class TestDrobolunlistDebug(unittest.TestCase):
                                lambda p, *a, **k: devs[os.path.basename(p)]):
             found = DroboIOctl.drobolunlist(0, 'Drobo')
         self.assertEqual(found, [['/dev/sdb'], ['/dev/sdc']])
+
+    def test_luns_grouped_by_kernel_idlun(self):
+        """ the real class: LUNs sharing host/channel/id form one Drobo. """
+        idluns = {'/dev/sdb': kernel_idlun(host=6, channel=0, id=0, lun=0),
+                  '/dev/sdc': kernel_idlun(host=6, channel=0, id=0, lun=1),
+                  '/dev/sdd': kernel_idlun(host=6, channel=1, id=0, lun=0),
+                  '/dev/sde': kernel_idlun(host=6, channel=0, id=1, lun=0),
+                  '/dev/sdf': kernel_idlun(host=7, channel=0, id=0, lun=0),
+                  '/dev/sdg': kernel_idlun(host=7, channel=0, id=0, lun=1)}
+
+        def fio(fd, request, arg, mutate=False):
+            fake_ioctl = FakeIoctl(idlun=idluns[fd.path],
+                                   inquiry=inquiry(b'Drobo', b'5D'))
+            return fake_ioctl(fd, request, arg, mutate)
+
+        names = [os.path.basename(p) for p in idluns]
+        with mock.patch.object(DroboIOctl.os, 'listdir', lambda d: names), \
+             mock.patch.object(DroboIOctl, 'open', fake_open, create=True), \
+             mock.patch.object(DroboIOctl, 'ioctl', fio), \
+             redirect_stdout(io.StringIO()):
+            found = DroboIOctl.drobolunlist(0, 'Drobo')
+        self.assertEqual(found, [['/dev/sdb', '/dev/sdc'], ['/dev/sdd'],
+                                 ['/dev/sde'], ['/dev/sdf', '/dev/sdg']])
 
     def test_real_class_through_fake_ioctl(self):
         """ drobolunlist with the real DroboIOctl class, faked at ioctl. """
