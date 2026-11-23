@@ -989,14 +989,15 @@ class Drobo:
 
     def decodeDiagnostics(self, diagfilename):
         try:
-            f = open(diagfilename)
+            f = open(diagfilename, 'rb')
             data = f.read()
             f.close()
         except:
             return ''
 
-        key = ord(data[0]) ^ 0x2d
-        datam = ''.join([chr(ord(x) ^ key) for x in data])
+        # one byte xor; each decrypted byte is one character (latin-1).
+        key = data[0] ^ 0x2d
+        datam = bytes([x ^ key for x in data]).decode('latin-1')
         return datam
 
     #

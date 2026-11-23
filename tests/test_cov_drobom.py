@@ -978,14 +978,12 @@ class TestDiagnostics(DrobomTestCase):
 
     def test_diagprint(self):
         text = '-- Drobo diagnostics\nslot 0 ok\n'
-        # a key that encodes nothing as \r or \n: decodeDiagnostics reads in
-        # text mode, which mangles those (already pinned in
-        # test_cov_writes_diag.)
-        key = next(k for k in range(1, 128)
-                   if not {chr(ord(c) ^ k) for c in text} & {'\r', '\n'})
+        # key 0x2d encrypts ' ' as '\r' and '\n' as "'": the file is read
+        # as bytes, so neither is mangled.
+        key = 0x2d
         path = os.path.join(self.tmp.name, 'diag.log')
-        with open(path, 'w') as f:
-            f.write(''.join(chr(ord(c) ^ key) for c in text))
+        with open(path, 'wb') as f:
+            f.write(bytes(ord(c) ^ key for c in text))
         r = self.drobom(*SIM, *ONE, 'diagprint', path)
         self.assertEqual(r.out, text + '\n')
 
