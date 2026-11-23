@@ -424,6 +424,16 @@ below from it; the code is our own.
    0x30 and 0x31 report impossible values (2304 and 64513 for a 1308 byte
    record), so they are never used: both pages are read at fixed offsets.
 
+ * Slot info 2, sub-page 0x35: temperature reads 0 in every slot of a 5D
+   on firmware 4.2.3 (not populated), so drobom info drives shows 0 as '-'
+   (_temptext).  A 5D lists its mSATA accelerator as a sixth slot, and its
+   config sub-page (0x01) counts six slots too, so the slot count cannot
+   tell bays from the accelerator.  The disk type byte can: GetSlotInfo2()
+   sets 'accelerator' for disk type 4 (SSD/mSATA), as GetRedundancyLevel()
+   already assumes, and drobom info drives lists such slots after the bays
+   under 'Accelerator (mSATA cache, not a drive bay):'.  An SSD in a bay
+   (type 2 or 3) stays a bay.
+
 
 Making a Release
 ----------------

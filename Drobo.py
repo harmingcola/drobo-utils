@@ -155,6 +155,14 @@ def _rpmtext(rpm):
     return str(rpm) if rpm else '-'
 
 
+def _temptext(temp):
+    """ short text for the temperature byte of sub-page 0x35: '-' for 0,
+        which means not populated (every slot of a Drobo 5D on firmware
+        4.2.3 reads 0, per ReDrobo), else the number.
+    """
+    return str(temp) if temp else '-'
+
+
 def _diskhealth(state):
     """ health from the low four bits of the disk state of sub-page 0x35. """
     return {0: 'Good', 1: 'Healed', 2: 'Warning', 3: 'Failed'}.get(state & 0x0f,
@@ -1730,6 +1738,8 @@ class Drobo:
           media ('HDD', 'SSD'), interface ('SATA', 'SAS', 'mSATA') and
           rpm (spindle speed: rotational_speed * 200, 0 for a drive that does
           not spin, None when unknown; see _driverpm)
+          accelerator (True for an mSATA accelerator slot, disk type 4,
+          which is a cache and not a drive bay)
 
         or None when the firmware does not support the sub-page.
 
@@ -1753,7 +1763,8 @@ class Drobo:
                      'total_capacity': 3000592982016,
                      'managed_capacity': 2999000000000, 'health': 'Good',
                      'media': 'HDD', 'interface': 'SATA',
-                     'rpm': _driverpm(36)} for i in range(4)]
+                     'rpm': _driverpm(36), 'accelerator': False}
+                    for i in range(4)]
 
         maxlen = 8 + 128 * max(self.slot_count, 8)  # room for padded records
         try:
@@ -1783,6 +1794,9 @@ class Drobo:
             slots[-1]['health'] = _diskhealth(f[3])
             slots[-1]['media'], slots[-1]['interface'] = _drivetype(f[4])
             slots[-1]['rpm'] = _driverpm(f[7])
+            # an mSATA SSD (disk type 4) is the accelerator (cache), not a
+            # drive bay: a 5D lists it as a sixth slot (ReDrobo.)
+            slots[-1]['accelerator'] = (f[4] == 4)
             off += stride
         return slots
 

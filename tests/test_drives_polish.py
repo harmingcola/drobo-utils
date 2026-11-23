@@ -115,5 +115,65 @@ class TestInfoDrivesRegression(unittest.TestCase):
                          (4, 'SSD', 'mSATA', 38))
 
 
+class TestTemperatureNotPopulated(unittest.TestCase):
+
+    def test_zero_shows_dash(self):
+        out = run_printdrives([record(0, temp=0)])
+        self.assertEqual(out[1],
+                         '   0      3000  Good     HDD/SATA        -       97'
+                         '       0   7200  WDC                      82.00A82'
+                         '  WD-WCC4N1234567')
+
+    def test_dash_lines_up_with_header(self):
+        out = run_printdrives([record(0, temp=0), record(1, temp=41)])
+        end = HEADER.index('Temp(C)') + len('Temp(C)')
+        self.assertEqual(out[1][end - 1], '-')
+        self.assertEqual(out[2][end - 2:end], '41')
+
+    def test_temperature_text(self):
+        self.assertEqual(Drobo._temptext(0), '-')
+        self.assertEqual(Drobo._temptext(38), '38')
+
+
+class TestAccelerator(unittest.TestCase):
+
+    def test_slotinfo2_flags_accelerator(self):
+        s = make_drobo(SlotInfo2Device(slotinfo2_page(FIVE_D))).GetSlotInfo2()
+        self.assertEqual([r['accelerator'] for r in s],
+                         [False] * 5 + [True])
+
+    def test_only_msata_is_accelerator(self):
+        recs = [record(i, disk_type=t) for i, t in enumerate((0, 1, 2, 3))]
+        s = make_drobo(SlotInfo2Device(slotinfo2_page(recs))).GetSlotInfo2()
+        self.assertEqual([r['accelerator'] for r in s], [False] * 4)
+
+    def test_simulation_has_no_accelerator(self):
+        with mock.patch.object(Drobo, 'DEBUG', Drobo.DBG_Simulation):
+            s = Drobo.Drobo.GetSlotInfo2(None)
+        self.assertEqual([r['accelerator'] for r in s], [False] * 4)
+
+    def test_listed_apart_from_bays(self):
+        out = run_printdrives(FIVE_D)
+        self.assertEqual(len(out), 8)
+        self.assertEqual(out[6], 'Accelerator (mSATA cache, not a drive bay):')
+        self.assertEqual(out[7],
+                         '   5       128  Good     SSD/mSATA      38       91'
+                         '       0      -  M4-CT128M4SSD3           82.00A82'
+                         '  WD-WCC4N1234567')
+
+    def test_accelerator_listed_after_bays_whatever_its_slot(self):
+        recs = [FIVE_D[5][:0] + bytes([0]) + FIVE_D[5][1:]] + \
+            [record(i) for i in (1, 2)]
+        out = run_printdrives(recs)
+        self.assertEqual([l[:4] for l in out[1:3]], ['   1', '   2'])
+        self.assertEqual(out[-2], 'Accelerator (mSATA cache, not a drive bay):')
+        self.assertTrue(out[-1].startswith('   0       128  Good     SSD/mSATA'))
+
+    def test_no_accelerator_no_extra_lines(self):
+        out = run_printdrives(FIVE_D[:5])
+        self.assertEqual(len(out), 6)
+        self.assertNotIn('ccelerator', '\n'.join(out))
+
+
 if __name__ == '__main__':
     unittest.main()
