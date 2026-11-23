@@ -102,6 +102,9 @@ unreleased
   * fix validateFirmware(): compare the header magic with b'TDIH'; the
     bytes from struct were compared with the str 'TDIH', so every firmware
     image was rejected as "bad Magic" (fwload/fwupgrade).
+  * fix PickFirmware() for .tdz archives: decode the INQUIRY hardware
+    revision before matching it against the member names; the int from the
+    bytes never matched, so no firmware was ever picked from a .tdz.
 
 0.6.2.2: 2010/02/06
 -------------------
