@@ -192,6 +192,31 @@ def _clocktext(clock):
                                     abs(off) // 60, abs(off) % 60)
 
 
+def vpd_serial(dev, sysfs='/sys'):
+    """ the unit serial number (INQUIRY VPD page 0x80) of block device dev
+        ('/dev/sdb' or 'sdb'), as the kernel cached it in
+        <sysfs>/block/<dev>/device/vpd_pg80, or None if that file is absent,
+        unreadable or not a serial number page.  Only reads that file: no
+        SCSI command is sent (Linux usb-storage often does not fetch VPD
+        pages, so expect None over USB.)
+    """
+    parts = (dev or '').split('/')
+    name = parts[-1]
+    if not name or '..' in parts or name == '.':
+        return None
+    try:
+        with open(os.path.join(sysfs, 'block', name, 'device', 'vpd_pg80'),
+                  'rb') as f:
+            data = f.read(260)
+    except (IOError, OSError):
+        return None
+    if len(data) < 4 or data[1] != 0x80:
+        return None
+    plen = struct.unpack('>H', data[2:4])[0]
+    text = data[4:4 + plen].split(b'\0')[0].decode('latin-1').strip()
+    return text or None
+
+
 def _pagebody(out, sub_page):
     """ given bytes starting at a page 0x3A sub page header, return the sub
         page body (as long as its header says, or as much as arrived), or
@@ -1403,6 +1428,25 @@ class Drobo:
         values = list(struct.unpack('>%dQ' % n, body[:n * 8]))
         values += [None] * (len(self._CAPACITY_FIELDS) - n)
         return dict(zip(self._CAPACITY_FIELDS, values))
+
+    def GetSerial(self):
+        """ the enclosure serial number from MODE SENSE page 0x3A sub-page
+        0x80 (4 byte page header, then a 24 character string), or None.
+
+        Sub-page 0x80 is also claimed by the vendor's event messages
+        record, so, like the vendor's ESADeviceSerial::parse, the string is
+        believed only if it starts with "DR".  Firmware 4.2.3 on a 5D
+        refuses the sub-page; that gives None too.  Facts from ReDrobo
+        (docs/PROTOCOL.md.)  A read only; untested on hardware here.
+        """
+        if DEBUG & DBG_Simulation:
+            return 'DRSIMULATED0000'
+        try:
+            body = self.__getsubpage_raw(0x80, 24)
+        except (DroboException, IOError):
+            return None
+        text = body[:24].split(b'\0')[0].decode('latin-1').strip()
+        return text if text.startswith('DR') else None
 
     def GetSubPageSlotInfo(self):
         """  returns list of slot info, each slot is:
