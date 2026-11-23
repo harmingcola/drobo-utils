@@ -352,6 +352,21 @@ USB 3 era units:
    1 MiB.  If a unit shows repeated 'reset SuperSpeed USB device' messages, try:
    echo 1024 > /sys/block/sdX/device/max_sectors
 
+ * What firmware 2.1.5 lacks.  Static analysis of the Drobo S 2.1.5 image
+   (release.Drobo3_rev3.tdf: HAManager::modeSense and
+   HAManager::systemOperation in runesa.vxe; nothing was run) finds no
+   page 0x3A sub-pages 0x33 (system info), 0x35 (slot info 2) or 0x80
+   (serial), nor 0x36-0x3A; and no 0xEA system operations 0x22 (event
+   log), 0x81 or 0x83 (extended LUN info).  Those come from later firmware
+   (5D/8D, 4.x).  A Drobo S Gen 2 may run 2.1.5.  So there GetSlotInfo2,
+   GetSerial, GetLUNsInfoEx/Ex2/Best return None, GetRedundancyLevel uses
+   sub-page 0x03, and drobom info drives/serial/volumes print one line
+   saying so.  An unknown sub-page or op should end as CHECK CONDITION
+   (IOError), but the code also treats a GOOD reply with no page, an
+   empty or short page, another sub-page's page, or an empty 0xEA reply
+   as 'not supported', with at most two CDBs per read and no retries
+   (tests/test_unsupported_features.py.)  Untested on hardware.
+   Sub-page 0x07 (LUN info 2) is present in 2.1.5.
 
 Protocol Notes: facts from ReDrobo
 ----------------------------------

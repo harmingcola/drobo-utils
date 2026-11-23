@@ -1992,8 +1992,8 @@ class Drobo:
                 data = self.__system_read(0x81, start, 1024)
             except (IOError, DroboException):
                 return None if not luns else luns
-            if len(data) < 3:
-                break
+            if len(data) < 3:  # no reply header: an unsupported op can
+                return luns or None  # answer GOOD with no data.
             count, more = data[1], data[2] & 1
             last = None
             for i in range(count):
@@ -2055,8 +2055,8 @@ class Drobo:
                 data = self.__system_read(0x83, start, 0x7c00, 1)
             except (IOError, DroboException):
                 return None if not luns else luns
-            if len(data) < 3:
-                break
+            if len(data) < 3:  # no reply header (see GetLUNsInfoEx)
+                return luns or None
             version, count, more = data[0], data[1], data[2] & 1
             off = 3
             last = None
