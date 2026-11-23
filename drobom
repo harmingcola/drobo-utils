@@ -324,8 +324,10 @@ def printluns(d):
     if Drobo.DEBUG & Drobo.DBG_Chatty:
         print('lun     size (GB) used    PTFmt  FStype:')
         for i in luninfo:
+            # LUNINFO-only tuples (no LUNINFO2) have no scheme or format.
+            scheme, fmt = (i[3], i[4]) if len(i) > 4 else ('-', '-')
             print(' %2d %8d  %8d  %7s %s ' %
-                  (i[0], togig(i[1]), togig(i[2]), i[3], i[4]))
+                  (i[0], togig(i[1]), togig(i[2]), scheme, fmt))
     else:
         for i in luninfo:
             print(i)

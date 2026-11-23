@@ -152,5 +152,23 @@ class TestInfoLunsRegression(unittest.TestCase):
                          [str(t) for t in OLD_LUNS])
 
 
+class TestInfoLunsWithoutLuninfo2(unittest.TestCase):
+    """ chatty drobom info luns with LUNINFO-only tuples (no partition
+        scheme or format): '-' instead of an IndexError. """
+
+    def test_fallback(self):
+        d, _ = drobo(how='ioerror')
+        out = quiet(run_printluns, d)
+        self.assertEqual(out, [
+            'lun     size (GB) used    PTFmt  FStype:',
+            '  0     2199         5        - - ',
+            '  1     1099         0        - - ',
+        ])
+
+    def test_without_feature(self):
+        d, _ = drobo(features=BASE_FEATURES)
+        self.assertEqual(len(run_printluns(d)), 3)
+
+
 if __name__ == '__main__':
     unittest.main()
