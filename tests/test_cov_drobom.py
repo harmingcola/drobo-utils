@@ -691,13 +691,26 @@ class TestInfo(DrobomTestCase):
         self.assertIn('/dev/sdq: bus=scsi1 channel=0 id=0 lun=0 '
                       '(vendor=TRUSTED , version=3)\n', r.out)
 
-    @unittest.expectedFailure
     def test_info_everything_simulated(self):
-        """ BUG (known, plans/10-redrobo-findings.md): plain
-            'drobom -v 128 info' fails with AttributeError, as a simulated
-            Drobo has no .inquiry for the scsi section. """
+        """ plain 'drobom -v 128 info'.  (It used to fail with
+            AttributeError: a simulated Drobo had no .inquiry for the scsi
+            section; plans/10-redrobo-findings.md.) """
         r = self.drobom(*SIM, *ONE, 'info')
-        self.assertIn('SCSI emulation information:', r.out)
+        self.assertEqual(r.code, FELL_THROUGH)
+        self.assertIn('SCSI emulation information:\n'
+                      "(b'TRUSTED ', b'Mass Storage    ', b'1.00')\n", r.out)
+        self.assertIn('Slot  Size(GB)', r.out)  # carried on to the end
+
+    def test_scsi_simulated(self):
+        """ the simulated INQUIRY; no device is opened for the per-device
+            lines (the DroboIOctl guard would fail the test.) """
+        self.assertEqual(self.info('scsi'),
+                         'SCSI emulation information:\n'
+                         "(b'TRUSTED ', b'Mass Storage    ', b'1.00')\n")
+        self.assertEqual(self.info('scsi', chatty=True),
+                         'SCSI emulation information:\n'
+                         'Vendor: TRUSTED   Model: Mass Storage     '
+                         'Revision: 1.00\n')
 
     def test_info_everything(self):
         """ with no options, every section is printed, in order. """
