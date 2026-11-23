@@ -105,7 +105,7 @@ class DroboIOctl:
         sfmt = "l"
         k = create_string_buffer(struct.calcsize(sfmt))
         if ioctl(self.sg_fd, sg_io_hdr.SG_GET_VERSION_NUM, k, True) < 0:
-            print("%s is not an sg device, or old sg driver\n" % char_dev_file)
+            print("%s is not an sg device, or old sg driver\n" % self.char_dev_file)
         num = struct.unpack(sfmt, k)
         return num[0]
 
