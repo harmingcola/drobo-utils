@@ -139,6 +139,12 @@ unreleased
     the constructor sets inquiry from it, so drobom -v 128 info (and info
     scsi) no longer raises AttributeError; the per-device SCSI lines, which
     need a real device, are left out in simulation.
+  * fix SetOptions() on units with OPTIONS2 but no iSCSI: GetOptions gives
+    no UseStaticIPAddress, IPAddress or NetMask there, so
+    SetOptions(GetOptions()) and drobom set raised KeyError after the 0x30
+    write.  Missing fields are now written back as the unit reports them
+    (sub-page 0x31, read before anything is written).  Units with iSCSI
+    get the same bytes as before, with no extra read.
 
 0.6.2.2: 2010/02/06
 -------------------
