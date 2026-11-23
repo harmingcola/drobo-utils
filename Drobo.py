@@ -851,6 +851,9 @@ class Drobo:
     GetOptions returns it), else read now.  Units that report no such byte
     get 0 there, as they always have.  It is never set from user input.
     """
+        if DEBUG & DBG_Simulation:  # nothing to write to
+            return
+
         flags = options.get("OptionsFlags")
         if flags is None:
             try:
@@ -906,6 +909,9 @@ class Drobo:
 
        status:  works with no issues!
     """
+        if DEBUG & DBG_Simulation:  # nothing to write to
+            return
+
         if (DEBUG & DBG_Chatty):
             print('set lunsize to %d TiB' % tb)
 
@@ -1330,6 +1336,8 @@ class Drobo:
         STATUS: works.
 
     """
+        if DEBUG & DBG_Simulation:  # nothing to write to
+            return
 
         totallength = len(self.fwdata)
         buffer = struct.pack(">L", totallength) + self.fwdata[0:self.fwhdr[0]]
