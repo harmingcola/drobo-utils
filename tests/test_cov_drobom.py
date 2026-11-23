@@ -285,18 +285,31 @@ class TestOptions(DrobomTestCase):
             self.assertIn('Phew', r.out)
             sls.assert_not_called()
 
-    @unittest.expectedFailure
     def test_long_yes(self):
-        """ BUG: usage advertises --yes, but the long option is declared
-            as 'y', so --yes is rejected (and --y trips 'assert False'.) """
+        """ usage advertises --yes (the long option used to be declared
+            as 'y', so --yes was rejected and --y tripped 'assert False'.) """
         with mock.patch.object(Drobo.Drobo, 'SetLunSize') as sls:
             r = self.drobom(*SIM, *ONE, '--yes', 'set', 'lunsize', '1')
         sls.assert_called_once_with(1)
+        self.assertIn('Done... Drobo is likely now rebooting.', r.out)
+        self.assertNotIn('Phew', r.out)
 
-    def test_long_y_trips_assert(self):
-        """ pins current behaviour of the mis-declared long option. """
-        with self.assertRaises(AssertionError):
-            self.drobom(*SIM, *ONE, '--y', 'list')
+    def test_long_y_is_short_for_yes(self):
+        """ getopt takes a unique prefix of a long option: --y is --yes. """
+        with mock.patch.object(Drobo.Drobo, 'SetLunSize') as sls:
+            r = self.drobom(*SIM, *ONE, '--y', 'set', 'lunsize', '1')
+        sls.assert_called_once_with(1)
+        self.assertIn('Done... Drobo is likely now rebooting.', r.out)
+
+    def test_unhandled_option_trips_assert(self):
+        """ the option loop's safety net: an option getopt returns but the
+            loop does not handle (as --y was, when declared as 'y') still
+            fails loudly. """
+        with mock.patch('getopt.getopt',
+                        return_value=([('--bogus', '')], ['list'])), \
+             self.assertRaises(AssertionError) as e:
+            self.drobom(*SIM, 'list')
+        self.assertEqual(str(e.exception), 'unhandled option')
 
     def test_unknown_command(self):
         r = self.drobom(*SIM, *ONE, 'bogus')

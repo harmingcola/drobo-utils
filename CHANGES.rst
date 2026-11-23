@@ -120,6 +120,9 @@ unreleased
   * fix drobom --verbose: usage and the man page advertise it, but only
     --verbosity was declared, so --verbose was rejected as a bad option.
     Both now work.
+  * fix drobom --yes: the long option was declared as 'y', so --yes was
+    rejected as a bad option and --y tripped 'assert False'.  --yes now
+    answers yes like -y (--no already worked).
 
 0.6.2.2: 2010/02/06
 -------------------
