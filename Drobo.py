@@ -1250,6 +1250,41 @@ class Drobo:
 
         return self.__getsubpage(0x02, 'QQQQ')
 
+    # field names of the capacity sub-page (0x02), in order: seven big endian
+    # u64 on newer firmware (page length 0x38), fewer on older units.
+    _CAPACITY_FIELDS = ('free', 'used', 'total', 'unprotected_total',
+                        'pt_free', 'pt_used', 'pt_total')
+
+    def GetCapacityEx(self):
+        """ every field of the capacity sub-page (0x02) the unit returns.
+        returns a dictionary, in bytes:
+
+          free, used, total   - protected capacity (GetSubPageCapacity [0:3])
+          unprotected_total   - capacity with no redundancy behind it
+                                (GetSubPageCapacity [3])
+          pt_free, pt_used, pt_total - the "PT" set of newer firmware
+
+        Fields the unit does not return are None.  Raises DroboException if
+        the page holds fewer than three fields.
+
+        Layout from ReDrobo (docs/PROTOCOL.md, ESACapacityInfoPT::parse,
+        page length 0x38 seen on a Drobo 5D, fw 4.2.3.)  What "PT" stands
+        for is not known.  Untested on hardware here.
+        """
+        if DEBUG & DBG_Simulation:
+            return {'free': 370267914240, 'used': 125184245760,
+                    'total': 495452160000, 'unprotected_total': 125184245760,
+                    'pt_free': 370267914240, 'pt_used': 125184245760,
+                    'pt_total': 495452160000}
+
+        body = self.__getsubpage_raw(0x02, 8 * len(self._CAPACITY_FIELDS))
+        n = min(len(body) // 8, len(self._CAPACITY_FIELDS))
+        if n < 3:
+            raise DroboException("capacity sub_page too short")
+        values = list(struct.unpack('>%dQ' % n, body[:n * 8]))
+        values += [None] * (len(self._CAPACITY_FIELDS) - n)
+        return dict(zip(self._CAPACITY_FIELDS, values))
+
     def GetSubPageSlotInfo(self):
         """  returns list of slot info, each slot is:
        ( slotId, PhysicalCapacity, ManagedCapacity, leds, Manufacturer, Model ) ... )

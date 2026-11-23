@@ -334,6 +334,26 @@ USB 3 era units:
    echo 1024 > /sys/block/sdX/device/max_sectors
 
 
+Protocol Notes: facts from ReDrobo
+----------------------------------
+
+ReDrobo (https://github.com/fetzu/ReDrobo, MIT licence) is a macOS client
+for USB Drobos.  Its docs/PROTOCOL.md decodes record layouts from the
+vendor's own service (DDService64d) and checks them against a live Drobo 5D
+on firmware 4.2.3 and the vendor's Dashboard.  drobo-utils uses the facts
+below from it; the code here is its own.  None of it is tested on hardware
+here.
+
+ * Capacity, sub-page 0x02, is seven big endian u64 on newer firmware (page
+   length 0x38): protected free, used and total, unprotected total, then
+   free, used and total of a "PT" set (meaning unknown.)  The first four are
+   what GetSubPageCapacity() has always read; GetCapacityEx() reads as many
+   fields as the unit returns, up to seven, and drobom info capacity shows
+   the unprotected total and the PT set as extra lines when present.  As
+   with every record, bytes past the declared page length are stale buffer
+   contents (on a 5D, fragments of its event log) and are ignored.
+
+
 Making a Release
 ----------------
 

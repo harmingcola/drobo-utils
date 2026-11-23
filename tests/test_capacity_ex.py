@@ -117,5 +117,123 @@ class TestCapacityRegression(unittest.TestCase):
         self.assertEqual(out[0], str(FOUR))
 
 
+KEYS = ('free', 'used', 'total', 'unprotected_total', 'pt_free', 'pt_used',
+        'pt_total')
+
+
+class TestCapacityEx(unittest.TestCase):
+    """ GetCapacityEx: every field the unit returns, by name. """
+
+    def test_seven_fields(self):
+        d, _ = drobo_with(SEVEN)
+        self.assertEqual(d.GetCapacityEx(), dict(zip(KEYS, SEVEN)))
+
+    def test_seven_fields_gen2(self):
+        d, _ = drobo_with(SEVEN, gen2=True)
+        self.assertEqual(d.GetCapacityEx(), dict(zip(KEYS, SEVEN)))
+
+    def test_four_field_page(self):
+        """ older firmware: the PT fields are None. """
+        d, _ = drobo_with(FOUR)
+        c = d.GetCapacityEx()
+        self.assertEqual(c, dict(zip(KEYS, FOUR + (None,) * 3)))
+
+    def test_three_field_page(self):
+        d, _ = drobo_with(FOUR[:3])
+        c = d.GetCapacityEx()
+        self.assertEqual((c['free'], c['used'], c['total']), FOUR[:3])
+        self.assertIsNone(c['unprotected_total'])
+        self.assertIsNone(c['pt_total'])
+
+    def test_partial_trailing_field_ignored(self):
+        page = capacity_page(FOUR)
+        page = page[:2] + struct.pack('>H', 36) + page[4:] + b'\x01\x02\x03\x04'
+
+        def respond(sub_page):
+            return page if sub_page == 0x02 else legacy_subpage(sub_page)
+
+        dev = FakeDevice(responder=respond)
+        c = make_drobo(dev).GetCapacityEx()
+        self.assertIsNone(c['pt_free'])
+        self.assertEqual(c['unprotected_total'], FOUR[3])
+
+    def test_stale_bytes_past_declared_length_ignored(self):
+        """ bytes past the page length are stale buffer contents. """
+        page = capacity_page(FOUR) + struct.pack('>3Q', 1, 2, 3)
+
+        def respond(sub_page):
+            return page if sub_page == 0x02 else legacy_subpage(sub_page)
+
+        c = make_drobo(FakeDevice(responder=respond)).GetCapacityEx()
+        self.assertIsNone(c['pt_free'])
+
+    def test_one_query_asks_for_whole_record(self):
+        d, dev = drobo_with(SEVEN)
+        d.GetCapacityEx()
+        self.assertEqual(len(dev.cdbs), 1)
+        cdb = dev.cdbs[0]
+        self.assertEqual(cdb[:4], bytes([0x5a, 0x00, 0x3a, 0x02]))
+        self.assertGreaterEqual(struct.unpack('>H', cdb[7:9])[0], 4 + 0x38)
+
+    def test_too_short_raises(self):
+        d, _ = drobo_with(FOUR[:2])
+        with self.assertRaises(Drobo.DroboException):
+            d.GetCapacityEx()
+
+    def test_simulation(self):
+        with mock.patch.object(Drobo, 'DEBUG', Drobo.DBG_Simulation):
+            c = Drobo.Drobo.GetCapacityEx(None)
+        self.assertEqual(set(c), set(KEYS))
+        self.assertEqual(c['free'] + c['used'], c['total'])
+
+
+class TestInfoCapacityEx(unittest.TestCase):
+    """ drobom info capacity: new fields as extra lines only. """
+
+    def test_chatty_seven_fields(self):
+        d, _ = drobo_with(SEVEN)
+        out = run_printcapacity(d)
+        self.assertEqual(out, [
+            'Capacity (in GB):  used: 200, free: 100, total: 300',
+            'Unprotected capacity (in GB):  total: 40',
+            'PT capacity (in GB):  used: 22, free: 11, total: 33',
+        ])
+
+    def test_chatty_four_fields(self):
+        d, _ = drobo_with(FOUR)
+        out = run_printcapacity(d)
+        self.assertEqual(out, [
+            'Capacity (in GB):  used: 200, free: 100, total: 300',
+            'Unprotected capacity (in GB):  total: 40',
+        ])
+
+    def test_chatty_three_fields(self):
+        """ nothing extra to show: output exactly as before. """
+        d, _ = drobo_with(FOUR[:3])
+        d.GetSubPageCapacity = lambda: FOUR
+        out = run_printcapacity(d)
+        self.assertEqual(out, [
+            'Capacity (in GB):  used: 200, free: 100, total: 300'])
+
+    def test_plain_seven_fields(self):
+        d, _ = drobo_with(SEVEN)
+        out = run_printcapacity(d, chatty=False)
+        self.assertEqual(out[0], str(FOUR))
+        self.assertEqual(out[1:], [str({'unprotected_total': 40 * GB,
+                                        'pt_free': 11 * GB,
+                                        'pt_used': 22 * GB,
+                                        'pt_total': 33 * GB})])
+
+    def test_extended_read_failure_keeps_old_output(self):
+        d, _ = drobo_with(FOUR)
+
+        def fail():
+            raise Drobo.DroboException('refused')
+
+        d.GetCapacityEx = fail
+        self.assertEqual(run_printcapacity(d), [
+            'Capacity (in GB):  used: 200, free: 100, total: 300'])
+
+
 if __name__ == '__main__':
     unittest.main()
