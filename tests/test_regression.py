@@ -608,6 +608,35 @@ class TestVendorCommands(unittest.TestCase):
                         0x20, 0x01, 0x00)
         ])
 
+    def test_standby_cdb_is_unchanged(self):
+        dev = FakeDevice()
+        dev.ea_responder = lambda mcb, sz, out: b'\0' * sz
+        d = make_drobo(dev)
+        txid = d.transactionID
+        dev.cdbs.clear()
+        with mock.patch.object(d, 'umount', return_value=True):
+            d.Standby()
+        self.assertEqual(dev.cdbs, [
+            struct.pack('>BBBBBBBHB', 0xea, 0x10, 0x00, 0x0d, 0x00, txid,
+                        0x20, 0x01, 0x00)
+        ])
+
+    def test_blink_and_standby_advance_the_transaction_id(self):
+        """ each command carries the current id, then advances it by one
+            (251, the largest id, wraps to 1.) """
+        dev = FakeDevice()
+        dev.ea_responder = lambda mcb, sz, out: b'\0' * sz
+        d = make_drobo(dev)
+        d.transactionID = Drobo.MAX_TRANSACTION + 1
+        dev.cdbs.clear()
+        d.Blink()
+        with mock.patch.object(d, 'umount', return_value=True):
+            d.Standby()
+        d.Blink()
+        self.assertEqual([c[5] for c in dev.cdbs],
+                         [Drobo.MAX_TRANSACTION + 1, 1, 2])
+        self.assertEqual(d.transactionID, 3)
+
 
 def lunex_entry(index, name=b'drobo', total=17592186044416, second=4398046511104,
                 fmt=0x08, lun=None):
