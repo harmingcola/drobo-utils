@@ -369,8 +369,19 @@ class TestSetOptions(DroboCase):
         self.assertEqual(len(self.dev.puts), 1)
 
     def test_set_options_sends_no_query_and_no_transaction(self):
-        self.d.SetOptions(options())
+        """ with OptionsFlags in the dict (as GetOptions returns it),
+            nothing is read. """
+        self.d.SetOptions(options(OptionsFlags=0))
         self.assertEqual(self.dev.cdbs, [])
+        self.assertEqual(self.d.transactionID, 7)
+
+    def test_set_options_without_flags_reads_only_0x30(self):
+        """ read-modify-write of the 0x30 flags byte: without OptionsFlags
+            in the dict, SetOptions reads it first (one MODE SENSE of 0x30;
+            this unit has no such page, so 0 is written, as before.) """
+        self.d.SetOptions(options())
+        self.assertEqual(self.dev.cdbs, [cdb(0x5a, 0, 0x3a, 0x30, 0, 0, 0,
+                                             13, 0)])
         self.assertEqual(self.d.transactionID, 7)
 
 

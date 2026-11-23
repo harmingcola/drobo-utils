@@ -419,8 +419,11 @@ below from it; the code is our own.
    check type (names from the vendor's ESAOptions::parse; which bit is
    which is not published).  GetOptions() returns that byte, undecoded, as
    OptionsFlags, which is read only (Drobo.READ_ONLY_OPTIONS; drobom set
-   refuses it).  Note that SetOptions() has always written 0 in that byte;
-   that is unchanged here, but it may clear those settings on newer units.
+   refuses it).  SetOptions() writes that byte back unchanged
+   (read-modify-write: OptionsFlags from the options dict, else read with
+   GetOptions); it used to write 0, which may have cleared those settings
+   on newer units.  Units with no such byte (GetOptions None, or no 0x30
+   page) still get 0 there.
    Options2, sub-page 0x31: +4 u64 featureOnOffStates (our Flags), +0x0C
    u16 spin down delay in minutes (our SpinDownDelayMinutes, confirmed: 14
    on ReDrobo's 5D), then the iSCSI addresses.  The page length fields of
