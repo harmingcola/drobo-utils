@@ -135,6 +135,10 @@ unreleased
     write nothing, as Sync() already did; they wrote through the missing
     device (fd None), so drobom -v 128 set <option> and set lunsize raised
     AttributeError.  No change on hardware.
+  * fix simulation (-v 128): inquire() returns a fixed Drobo v1 answer and
+    the constructor sets inquiry from it, so drobom -v 128 info (and info
+    scsi) no longer raises AttributeError; the per-device SCSI lines, which
+    need a real device, are left out in simulation.
 
 0.6.2.2: 2010/02/06
 -------------------

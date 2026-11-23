@@ -956,6 +956,15 @@ class TestSimulationInProcess(CovTestCase):
         self.assertIsNone(self.d.fd)
         self.assertEqual(self.d.fw[6], 'ArmMarvell')
 
+    def test_simulated_inquiry(self):
+        """ a fixed INQUIRY answer (vendor, product, revision at 8:11, as
+            inquire() returns them), with no device involved. """
+        self.assertEqual(self.d.inquiry[8:11],
+                         (b'TRUSTED ', b'Mass Storage    ', b'1.00'))
+        with self.stdout():
+            self.assertEqual(self.d.inquire(), self.d.inquiry)
+        self.assertIsNone(self.d.fd)
+
     def test_slot_count_set_by_constructor(self):
         """ as on hardware, the constructor reads the (simulated) config,
             so slot_count is there before GetSubPageConfig is called. """
