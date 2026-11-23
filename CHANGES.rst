@@ -54,6 +54,10 @@ unreleased
     UTC offset decoded as minutes east (None when implausible, as on Gen 1);
     drobom adds a 'Drobo clock' line to the info header and to drobom time.
     GetSubPageSettings() is unchanged.  Facts from ReDrobo.
+  * GetOptions(): new read-only key OptionsFlags, the packed flags byte at
+    +6 of sub-page 0x30 (use unprotected capacity, realtime and background
+    data check; bits not decoded); drobom set refuses it.  Existing keys
+    unchanged; the unreliable 0x30/0x31 length fields stay unused.
   * tests: more regression fixtures (LUN info, options, DroboPro inquiry.)
   * name status bits: incompatible disk pack, power supply missing, fan
     partially failed, fan failed, fan missing.

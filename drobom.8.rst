@@ -60,6 +60,7 @@ Command is one of:
   show device files for all Drobos found.
 * *set \<options\> \<value\>*
   set firmware options, such as ipaddress, etc... use 'info settings'
+  to see them.  Read-only options (OptionsFlags) are refused.
 * *set name  <newname>*
   Set the name of the Drobo to the given value ( only firmware > 1.3.0 supports this command )
 * *set lunsize*  

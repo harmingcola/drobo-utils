@@ -56,6 +56,10 @@ DBG_General = 0x20
 # in simulation mode, can run non-root, best for GUI work.
 DBG_Simulation = 0x80
 
+# GetOptions keys that are read only: SetOptions does not write them, so
+# drobom set refuses them.
+READ_ONLY_OPTIONS = ('OptionsFlags',)
+
 #for generic SCSI IO details...
 import DroboIOctl
 
@@ -2075,6 +2079,12 @@ class Drobo:
 
     def GetOptions(self):
         """
+        OptionsFlags (all units with options): the raw flags byte at +6 of
+        sub-page 0x30.  ReDrobo (docs/PROTOCOL.md, from the vendor's
+        ESAOptions::parse) names what it packs: use unprotected capacity,
+        realtime data check and background data check type.  Which bit is
+        which is not published, so it is not decoded.  Read only.
+
         different fw/hw combinations will return different results.
         return one of:
            None 
@@ -2102,11 +2112,16 @@ class Drobo:
                     "SpinDownDelayMinutes":5, "SpinDownDelay": True, \
                     "UseStaticIPAddress":True, "IPAddress":'192.168.10.4', \
                     "NetMask":'255.255.255.0', "DualDiskRedundancy":True, \
-                    "UseManualVolumeManagement":False }
+                    "UseManualVolumeManagement":False, "OptionsFlags": 0 }
         if 'SUPPORTS_OPTIONS2' in self.features or self.fw[7] >= '1.1.0':
             # insert try/except for compatibility with firmware <= 1.1.0
+            # never trust the page length field of 0x30 or 0x31: ReDrobo
+            # saw 2304 and 64513 on a 5D.  Fixed offsets only.
             o = self.__getsubpage(0x30, 'BBBIBB')
             d = {"YellowThreshold": o[0], "RedThreshold": o[1]}
+            # +6: packed flags (use unprotected capacity, realtime data
+            # check, background data check type; bit positions unpublished.)
+            d["OptionsFlags"] = o[2]
             if ('SUPPORTS_OPTIONS2' in self.features):
                 ( flags, d['SpinDownDelayMinutes'], \
                   rawipb, rawnmb, rawgwb, mtub, \

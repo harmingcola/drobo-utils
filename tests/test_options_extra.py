@@ -129,5 +129,40 @@ class TestOptionsRegression(unittest.TestCase):
         self.assertEqual((o['YellowThreshold'], o['RedThreshold']), (85, 95))
 
 
+class TestOptionsFlags(unittest.TestCase):
+    """ the packed flags byte at +6 of 0x30, as 'OptionsFlags'. """
+
+    def test_v1(self):
+        d, _ = drobo(BASE_FEATURES, p30=options_page(flags=0xa5))
+        self.assertEqual(d.GetOptions(), dict(OLD_V1, OptionsFlags=0xa5))
+
+    def test_v2(self):
+        d, _ = drobo(p30=options_page(flags=0x03))
+        self.assertEqual(d.GetOptions(), dict(OLD_V2, OptionsFlags=0x03))
+
+    def test_untrusted_length(self):
+        d, _ = drobo(p30=options_page(flags=0x07, length=2304),
+                     gen2_style=True)
+        self.assertEqual(d.GetOptions()['OptionsFlags'], 0x07)
+
+    def test_simulation(self):
+        with mock.patch.object(Drobo, 'DEBUG', Drobo.DBG_Simulation):
+            o = Drobo.Drobo.GetOptions(None)
+        self.assertIn('OptionsFlags', o)
+
+    def test_read_only(self):
+        self.assertIn('OptionsFlags', Drobo.READ_ONLY_OPTIONS)
+
+    def test_drobom_set_refuses_read_only_option(self):
+        """ no MODE SELECT is attempted for a read-only key. """
+        r = subprocess.run([sys.executable, os.path.join(TOP, 'drobom'),
+                            '-v', '128', 'set', 'OptionsFlags', '1'],
+                           cwd=TOP, capture_output=True, text=True,
+                           timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stderr, '')
+        self.assertIn('read-only', r.stdout)
+
+
 if __name__ == '__main__':
     unittest.main()
