@@ -820,7 +820,7 @@ class Drobo:
 
         now = int(time.time())
         payload = "LH32s"
-        payloadlen = struct.calcsize(payload)
+        payloadlen = struct.calcsize(">" + payload)
         if NewName == None:
             NewName = self.GetSubPageSettings()[2]
         if isinstance(NewName, str):
@@ -847,7 +847,7 @@ class Drobo:
     """
         # v1 Options first...
         fmt = 'BBBLBB'
-        payloadlen = struct.calcsize(fmt)
+        payloadlen = struct.calcsize(">" + fmt)
         buffer = struct.pack(">BBH" + fmt, 0x7a, 0x30, payloadlen,
                              options["YellowThreshold"],
                              options["RedThreshold"], 0, 0, 0, 0)
@@ -872,7 +872,7 @@ class Drobo:
                 flags |= 0x0008
 
             fmt = 'QHLLB'
-            payloadlen = struct.calcsize(fmt)
+            payloadlen = struct.calcsize(">" + fmt)
             # the ffff mask is there to suppress python 2.5 warning:
             #  DeprecationWarning: struct integer overflow masking is deprecated
             # which is quite strange because not a problem in 2.6.

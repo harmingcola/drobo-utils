@@ -107,14 +107,23 @@ class DroboCase(unittest.TestCase):
 # --- Sync ---------------------------------------------------------------------
 
 
-# The sub-page header length fields are computed with struct.calcsize() on
-# the format WITHOUT '>', i.e. native sizes and alignment, while the body is
-# packed big endian with standard sizes. The pins below use the same native
-# calcsize, so they hold on any platform; on 64-bit Linux they are 42 / 18 /
-# 33 where the bodies are 38 / 9 / 19 bytes. See the expectedFailure tests.
-SYNC_LEN = struct.calcsize('LH32s')
-OPT1_LEN = struct.calcsize('BBBLBB')
-OPT2_LEN = struct.calcsize('QHLLB')
+# The sub-page header length field is the length of the big endian body
+# that follows it: 38 (LH32s), 9 (BBBLBB) and 19 (QHLLB) bytes on every
+# platform. (It used to be the native struct size: 42 / 18 / 33 on 64-bit.)
+SYNC_LEN = 38
+OPT1_LEN = 9
+OPT2_LEN = 19
+
+# what the header length used to be (native sizes); only header bytes 2:4
+# may differ from a buffer packed with these.
+NATIVE_SYNC_LEN = struct.calcsize('LH32s')
+NATIVE_OPT1_LEN = struct.calcsize('BBBLBB')
+NATIVE_OPT2_LEN = struct.calcsize('QHLLB')
+
+
+def differing_offsets(a, b):
+    assert len(a) == len(b)
+    return [i for i in range(len(a)) if a[i] != b[i]]
 
 
 class TestSync(DroboCase):
@@ -142,14 +151,31 @@ class TestSync(DroboCase):
         self.assertEqual(buf[10:17], b'NEWNAME')
         self.assertEqual(buf[17:], b'\0' * 25)
 
-    @unittest.expectedFailure
     def test_sync_header_length_is_body_length(self):
-        # BUG: payloadlen = struct.calcsize("LH32s") uses native sizes; on
-        # 64-bit hosts 'L' is 8 bytes, so the header claims 42 bytes of
-        # sub-page data while only 38 follow.
+        """ the header claims exactly the 38 bytes that follow it (it used
+            the native calcsize("LH32s"), 42 on 64-bit hosts). """
         self.sync(b'NEWNAME')
         buf = self.dev.puts[0][1]
         self.assertEqual(struct.unpack('>H', buf[2:4])[0], len(buf) - 4)
+        self.assertEqual(len(buf) - 4, 38)
+
+    def test_sync_exact_bytes(self):
+        """ Sync is a write: every byte of CDB and buffer is pinned. """
+        self.sync(b'NEWNAME')
+        self.assertEqual(self.dev.puts, [(
+            bytes.fromhex('55017a05000000002a00'),
+            bytes.fromhex('7a050026' '6553f100' '0000') + b'NEWNAME'
+            + b'\0' * 25)])
+
+    def test_sync_only_the_header_length_changed(self):
+        """ against the old (native length) packing, only bytes 2:4 of the
+            buffer differ, and the CDB is the same. """
+        self.sync(b'NEWNAME')
+        mcb, buf = self.dev.puts[0]
+        old = struct.pack('>BBHLH32s', 0x7a, 0x05, NATIVE_SYNC_LEN,
+                          self.NOW, 0, b'NEWNAME')
+        self.assertEqual(mcb, cdb(0x55, 0x01, 0x7a, 0x05, 0, 0, 0, 42, 0))
+        self.assertTrue(set(differing_offsets(buf, old)) <= {2, 3})
 
     def test_sync_sends_no_0xea_and_leaves_transaction_alone(self):
         self.sync(b'X')
@@ -272,14 +298,42 @@ class TestSetOptions(DroboCase):
                 self.assertEqual(self.dev.puts[1], (V2_CDB, v2_buffer(
                     flags, spin, [192, 168, 10, 4], [255, 255, 255, 0])))
 
-    @unittest.expectedFailure
     def test_options_header_lengths_are_body_lengths(self):
-        # BUG: as in Sync, payloadlen comes from native calcsize('BBBLBB')
-        # and calcsize('QHLLB') (18 and 33 on 64-bit Linux, 10 and 21 even
-        # on 32-bit) while the bodies are 9 and 19 bytes.
+        """ as in Sync: 9 and 19 bytes follow the headers, and the headers
+            say so (they used the native calcsize('BBBLBB') and
+            calcsize('QHLLB'), 18 and 33 on 64-bit Linux). """
         self.d.SetOptions(options())
         for c, buf in self.dev.puts:
             self.assertEqual(struct.unpack('>H', buf[2:4])[0], len(buf) - 4)
+        self.assertEqual([len(b) - 4 for c, b in self.dev.puts], [9, 19])
+
+    def test_options_exact_bytes(self):
+        """ SetOptions is a write: every byte of both CDBs and buffers. """
+        self.d.SetOptions(options(YellowThreshold=80, RedThreshold=90,
+                                  DualDiskRedundancy=True,
+                                  SpinDownDelayMinutes=15,
+                                  IPAddress='10.1.2.3',
+                                  NetMask='255.0.0.0'))
+        self.assertEqual(self.dev.puts, [
+            (bytes.fromhex('55017a30000000000d00'),
+             bytes.fromhex('7a300009' '505a00' '00000000' '0000')),
+            (bytes.fromhex('55017a31000000001700'),
+             bytes.fromhex('7a310013' '0000000000000003' '000f'
+                           '0a010203' 'ff000000' '00')),
+        ])
+
+    def test_options_only_the_header_lengths_changed(self):
+        """ against the old (native length) packing, only bytes 2:4 of
+            each buffer differ; the CDBs are unchanged. """
+        self.d.SetOptions(options(YellowThreshold=80, RedThreshold=90))
+        (c1, b1), (c2, b2) = self.dev.puts
+        old1 = struct.pack('>BBHBBBLBB', 0x7a, 0x30, NATIVE_OPT1_LEN,
+                           80, 90, 0, 0, 0, 0)
+        old2 = struct.pack('>BBHQHLLB', 0x7a, 0x31, NATIVE_OPT2_LEN,
+                           0, 0, 0xc0a80a04, 0xffffff00, 0)
+        self.assertEqual((c1, c2), (V1_CDB, V2_CDB))
+        self.assertTrue(set(differing_offsets(b1, old1)) <= {2, 3})
+        self.assertTrue(set(differing_offsets(b2, old2)) <= {2, 3})
 
     def test_options2_address_byte_order(self):
         self.d.SetOptions(options(IPAddress='10.1.2.3',
