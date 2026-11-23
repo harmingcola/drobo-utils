@@ -255,5 +255,118 @@ class TestDrobomSetKeepsFlags(DrobomTestCase):
         return dev.puts
 
 
+NO_ISCSI_FEATURES = BASE_FEATURES | SUPPORTS_OPTIONS2  # e.g. a Drobo S
+
+
+class TestSetOptionsWithoutIscsi(unittest.TestCase):
+    """ units with SUPPORTS_OPTIONS2 but not SUPPORTS_ISCSI: GetOptions has
+        no UseStaticIPAddress, IPAddress or NetMask there, so
+        SetOptions(GetOptions()) used to raise KeyError after the 0x30
+        write.  Those 0x31 fields are now written back as the unit reports
+        them (read fresh), like the 0x30 flags byte.  Units with iSCSI get
+        exactly the bytes they always got, with no extra read. """
+
+    def test_options_lack_the_address_keys(self):
+        d, dev = drobo(NO_ISCSI_FEATURES, p30=options_page(0x05))
+        o = d.GetOptions()
+        for k in ('UseStaticIPAddress', 'IPAddress', 'NetMask'):
+            self.assertNotIn(k, o)
+
+    def test_set_get_options_round_trip(self):
+        d, dev = drobo(NO_ISCSI_FEATURES, p30=options_page(0x05),
+                       p31=options2_page(0x0001, spindown=14))
+        d.SetOptions(d.GetOptions())
+        self.assertEqual(dev.puts, [
+            (V1_CDB, bytes.fromhex('7a300009' '555f05' '00000000' '0000')),
+            (V2_CDB, bytes.fromhex('7a310013' '0000000000000003' '000e'
+                                   '0a000005' 'ff000000' '00')),
+        ])
+
+    def test_set_get_options_round_trip_gen2(self):
+        d, dev = drobo(NO_ISCSI_FEATURES, p30=options_page(0x05),
+                       p31=options2_page(0x0001, spindown=14),
+                       gen2_style=True)
+        d.SetOptions(d.GetOptions())
+        self.assertEqual(dev.puts, [
+            (V1_CDB, with_flags(v1_today(85, 95), 0x05)),
+            (V2_CDB, v2_today(0x3, 14, [10, 0, 0, 5], [255, 0, 0, 0])),
+        ])
+
+    def test_unit_values_written_back(self):
+        """ the static IP bit (0x0008) and the first address set come from
+            the unit as it is now. """
+        d, dev = drobo(NO_ISCSI_FEATURES, p30=options_page(0),
+                       p31=options2_page(0x0009, spindown=0,
+                                         before=('192.168.1.7',
+                                                 '255.255.255.0',
+                                                 '192.168.1.1', 1500)))
+        d.SetOptions(d.GetOptions())
+        self.assertEqual(dev.puts, [
+            (V1_CDB, v1_today(85, 95)),
+            (V2_CDB, v2_today(0x9, 0, [192, 168, 1, 7], [255, 255, 255, 0])),
+        ])
+
+    def test_unit_read_before_anything_is_written(self):
+        """ the 0x31 read comes first: if it fails, nothing is written. """
+        d, dev = drobo(NO_ISCSI_FEATURES, p30=options_page(0x05))
+        o = d.GetOptions()
+        dev.cdbs.clear()
+        with mock.patch.object(dev, 'responder',
+                               side_effect=IOError('io_hdr status is: 2')):
+            with self.assertRaises(IOError):
+                d.SetOptions(o)
+        self.assertEqual(dev.puts, [])
+
+    def test_dict_values_win(self):
+        """ keys present in the dict are used, not re-read. """
+        d, dev = drobo(NO_ISCSI_FEATURES, p30=options_page(0x05))
+        d.SetOptions(options(OptionsFlags=0x05))
+        self.assertEqual(sensed(dev), [])
+        self.assertEqual(dev.puts, [
+            (V1_CDB, with_flags(v1_today(80, 90), 0x05)), V2_FOR_OPTIONS])
+
+    def test_iscsi_unit_bytes_unchanged_and_not_reread(self):
+        """ regression: an iSCSI unit's GetOptions has every key; exactly
+            the bytes sent before this fix, and no read during the set. """
+        d, dev = drobo(p30=options_page(0x05),
+                       p31=options2_page(0x0001, spindown=14))
+        o = d.GetOptions()
+        dev.cdbs.clear()
+        d.SetOptions(o)
+        self.assertEqual(sensed(dev), [])
+        self.assertEqual(dev.puts, [
+            (V1_CDB, bytes.fromhex('7a300009' '555f05' '00000000' '0000')),
+            (V2_CDB, bytes.fromhex('7a310013' '0000000000000003' '000e'
+                                   '0a000005' 'ff000000' '00')),
+        ])
+
+
+class TestDrobomSetWithoutIscsi(DrobomTestCase):
+    """ drobom set on a unit with OPTIONS2 but not iSCSI, end to end. """
+
+    def test_yellow_threshold(self):
+        dev = PutDevice(responder=responder(
+            NO_ISCSI_FEATURES, p30=options_page(0x05),
+            p31=options2_page(0x0001, spindown=14)))
+        with self.device(dev):
+            r = self.drobom('set', 'YellowThreshold', '70')
+        self.assertEqual(r.out, '')
+        self.assertEqual(r.err, '')
+        self.assertEqual(dev.puts, [
+            (V1_CDB, with_flags(v1_today(70, 95), 0x05)),
+            (V2_CDB, v2_today(0x3, 14, [10, 0, 0, 5], [255, 0, 0, 0])),
+        ])
+
+    def test_address_options_not_offered(self):
+        """ GetOptions has no IPAddress there, so drobom does not set it. """
+        dev = PutDevice(responder=responder(
+            NO_ISCSI_FEATURES, p30=options_page(0x05),
+            p31=options2_page(0x0001, spindown=14)))
+        with self.device(dev):
+            r = self.drobom('set', 'IPAddress', '10.9.9.9')
+        self.assertEqual(r.out, 'option not present:  IPAddress\n')
+        self.assertEqual(dev.puts, [])
+
+
 if __name__ == '__main__':
     unittest.main()

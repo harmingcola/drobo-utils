@@ -355,11 +355,23 @@ class TestSetOptions(DroboCase):
         self.assertEqual(self.dev.puts, plain)
         self.assertEqual(len(plain), 2)
 
-    def test_options2_requires_address_fields(self):
-        with self.assertRaises(KeyError):
+    def test_options2_missing_address_fields_read_first(self):
+        """ address fields missing from the dict are read from the unit
+            (sub-page 0x31) before anything is written; this unit has no
+            0x31, so nothing goes out.  (It used to raise KeyError after
+            the v1 page had been sent.) """
+        with self.assertRaises(IOError):
             self.d.SetOptions({'YellowThreshold': 1, 'RedThreshold': 2})
+        self.assertEqual(self.dev.puts, [])
+
+    def test_options2_still_requires_the_other_fields(self):
+        """ only the address fields are filled in from the unit. """
+        o = options()
+        del o['DualDiskRedundancy']
+        with self.assertRaises(KeyError):
+            self.d.SetOptions(o)
         # the v1 page has already gone out by then.
-        self.assertEqual(self.dev.puts, [(V1_CDB, v1_buffer(1, 2))])
+        self.assertEqual(self.dev.puts, [(V1_CDB, v1_buffer(85, 95))])
 
     def test_simulation_sends_nothing(self):
         """ in simulation SetOptions writes nothing, with or without
