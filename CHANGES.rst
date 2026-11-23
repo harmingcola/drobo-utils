@@ -149,6 +149,13 @@ unreleased
     one 0x00 byte of data-out, as the vendor's software sends), and check
     every 0xEA command's SG direction and length agree with its CDB.  No
     change on the wire: drobo-utils already sends the byte.
+  * fix GetLUNsInfoEx()/GetLUNsInfoEx2() on firmware without the op: an
+    empty or too short reply now gives None (not supported), as an I/O
+    error already did, so GetLUNsInfoBest() falls back from op 0x83 to
+    0x81 and drobom info volumes prints 'not supported' instead of a bare
+    table header.  Tests check every feature firmware 2.1.5 lacks
+    (sub-pages 0x33/0x35/0x80, ops 0x22/0x81/0x83) against each way a unit
+    can refuse it; the sub-page features were already graceful.
 
 0.6.2.2: 2010/02/06
 -------------------
