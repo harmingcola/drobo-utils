@@ -178,7 +178,7 @@ class DroboIOctl:
         io_hdr.cmdp = mcb
 
         sense_buffer = create_string_buffer(64)
-        self.mx_sb_len = len(sense_buffer)
+        io_hdr.mx_sb_len = len(sense_buffer)
         io_hdr.sbp = cast(sense_buffer, c_char_p)
         io_hdr.sb_len_wr = 0  # initialize just in case...
 
