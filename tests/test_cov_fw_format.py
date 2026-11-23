@@ -105,26 +105,6 @@ def make_firmware(body=b'firmware body ' * 10, magic=b'TDIH', extra=b'',
     return hdr + body
 
 
-class _MagicAsText:
-    """ stands in for the struct module inside Drobo, so that the magic
-        field of the firmware header comes back as text.  That works around
-        the bytes/str magic bug (see TestValidateFirmware) so the checks
-        after it can be characterised too. """
-
-    def __getattr__(self, name):
-        return getattr(struct, name)
-
-    def unpack(self, fmt, data):
-        r = struct.unpack(fmt, data)
-        if fmt == FWHDR:
-            r = r[:2] + (r[2].decode('latin-1'),) + r[3:]
-        return r
-
-
-def magic_as_text():
-    return mock.patch.object(Drobo, 'struct', _MagicAsText())
-
-
 class WritingDevice(FakeDevice):
     """ a FakeDevice that also accepts writes (put_sub_page), recording each
         (CDB, payload), and answers the firmware write status query. """
@@ -232,20 +212,16 @@ class TestValidateFirmware(CovTestCase):
         self.assertEqual(self.d.fwhdr[8], len(fw) - FWHDR_LEN - 8)
         self.assertEqual(self.d.fwhdr[2], b'TDIH')
 
-    # BUG: struct.unpack returns the magic as bytes (b'TDIH') but it is
-    # compared with the text 'TDIH', so under Python 3 every firmware image,
-    # however good, is rejected with 'bad Magic'.
-    @unittest.expectedFailure
+    # struct.unpack returns the magic as bytes (b'TDIH'); it used to be
+    # compared with the text 'TDIH', so every image was rejected.
     def test_good_image_validates(self):
         good, out = self.validate(make_firmware())
+        self.assertNotIn('bad Magic', out)
         self.assertEqual(good, 1)
 
-    # the checks after the magic, with the magic bug worked around:
-
-    def test_good_image_validates_past_magic(self):
-        with magic_as_text():
-            good, out = self.validate(make_firmware(extra=b'more header'),
-                                      Drobo.DBG_Chatty)
+    def test_good_image_traces_every_check(self):
+        good, out = self.validate(make_firmware(extra=b'more header'),
+                                  Drobo.DBG_Chatty)
         self.assertEqual(good, 1)
         for line in ('validateFirmware start...',
                      'header+body lengths validated.  Good.',
@@ -256,14 +232,12 @@ class TestValidateFirmware(CovTestCase):
             self.assertIn(line, out)
 
     def test_header_crc_wrong(self):
-        with magic_as_text():
-            good, out = self.validate(make_firmware(hdrcrc_delta=1))
+        good, out = self.validate(make_firmware(hdrcrc_delta=1))
         self.assertEqual(good, 0)
         self.assertIn('file corrupt, header checksum wrong', out)
 
     def test_body_crc_wrong(self):
-        with magic_as_text():
-            good, out = self.validate(make_firmware(bodycrc_delta=1))
+        good, out = self.validate(make_firmware(bodycrc_delta=1))
         self.assertEqual(good, 0)
         self.assertIn('file corrupt, payload checksum wrong', out)
 

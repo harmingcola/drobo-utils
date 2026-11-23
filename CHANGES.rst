@@ -99,6 +99,9 @@ unreleased
   * fix decodeDiagnostics(): read the file as bytes and decode one character
     per byte; text mode returned '' for non UTF-8 bytes and turned an
     encrypted CR into LF, corrupting drobom diagprint output.
+  * fix validateFirmware(): compare the header magic with b'TDIH'; the
+    bytes from struct were compared with the str 'TDIH', so every firmware
+    image was rejected as "bad Magic" (fwload/fwupgrade).
 
 0.6.2.2: 2010/02/06
 -------------------
