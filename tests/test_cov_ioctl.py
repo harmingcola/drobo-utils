@@ -290,21 +290,14 @@ class TestVersion(unittest.TestCase):
         self.assertIs(fio.calls[0]['fd'], dio.sg_fd)
         self.assertTrue(fio.calls[0]['mutate'])
 
-    # BUG: version() names an undefined variable 'char_dev_file' (should be
-    # self.char_dev_file) in its error message, so a failing
-    # SG_GET_VERSION_NUM raises NameError instead of printing the warning.
-    @unittest.expectedFailure
+    # version() used to name an undefined variable 'char_dev_file' here, so
+    # a failing SG_GET_VERSION_NUM raised NameError instead of warning.
     def test_failure_prints_warning(self):
         fio = FakeIoctl(result=-1)
         dio = open_dev('/dev/sdq')
         result, out = call(fio, dio.version)
         self.assertIn('/dev/sdq is not an sg device', out)
-
-    def test_failure_currently_raises_nameerror(self):
-        fio = FakeIoctl(result=-1)
-        dio = open_dev()
-        exc, out = call_raises(self, NameError, fio, dio.version)
-        self.assertIn('char_dev_file', str(exc))
+        self.assertEqual(result, 0)  # the buffer the driver never filled
 
 
 # --- get_sub_page ---------------------------------------------------------------
