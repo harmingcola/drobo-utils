@@ -50,6 +50,13 @@ TUNNEL_HEADER = '>LLLLL'  # magic, version, direction, length, CDB length
 TUNNEL_REPLY_HEADER = '>LLL'  # magic, version, data length
 TUNNEL_DATA_IN = 1
 TUNNEL_DATA_OUT = 0
+# SG_IO timeout (milliseconds) for each tunnel WRITE(10)/READ(10).  The
+# firmware answers from memory, in milliseconds; a request it does not
+# handle never completes, and when SG_IO gives up the kernel resets the USB
+# link anyway.  So fail sooner than pass-through's 20 s, but leave room for
+# the tunnel write to queue behind ordinary disk I/O while drives spin up
+# (several seconds each.)  Pass-through keeps sg_io_hdr's 20 s.
+TUNNEL_TIMEOUT_MS = 10000
 
 # identities (see _identity_key) that use the tunnel: a rule matches when
 # every one of its substrings is present.
@@ -382,6 +389,7 @@ class DroboIOctl:
             Raises IOError unless the command completed with GOOD status.
         """
         io_hdr = sg_io_hdr()
+        io_hdr.timeout = TUNNEL_TIMEOUT_MS
         io_hdr.dxfer_direction = direction
         io_hdr.cmd_len = len(cdb)
         io_hdr.cmdp = cdb

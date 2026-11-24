@@ -74,6 +74,49 @@ class DroboException(Exception):
         print("Problem accessing a Drobo: " + self.msg)
 
 
+class FirmwareLacks(DroboException):
+    """ raised, before anything is sent, for a request the unit's firmware
+    does not implement (see FIRMWARE_IMPLEMENTS.)  Callers treat it like
+    any refusal: it is a DroboException.
+  """
+
+
+# What a firmware version implements, from static analysis of its image
+# (the dispatch tables for MODE SENSE page 0x3A sub-pages and for 0xEA
+# system operations.)  Keyed on (major, minor) of the version string in
+# sub-page 0x08.  Through the ATA tunnel, firmware 2.1.5 does not refuse a
+# request it lacks: the tunnel write never completes, SG_IO times out and
+# the kernel resets the USB link.  So on the tunnel, nothing outside these
+# sets is sent (Drobo._fw_implements.)  Firmware not listed here is not
+# gated.  See "Firmware capability gate" in DEVELOPERS.rst.
+FIRMWARE_IMPLEMENTS = {
+    (2, 1): {
+        # 0x01 config, 0x02 capacity, 0x03 slots, 0x04 LUNs, 0x05 settings,
+        # 0x06 protocol, 0x07 LUN info 2, 0x08 firmware, 0x09 status,
+        # 0x11 disk pack, 0x15 LUN identity, 0x30/0x31 options,
+        # 0x82 interface.  Lacks 0x33, 0x35 to 0x3A and 0x80.  (0xE1/0xE2
+        # exist but operate on drives: left out on purpose.)
+        'sub_pages': frozenset((0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+                                0x08, 0x09, 0x11, 0x15, 0x30, 0x31, 0x82)),
+        # 0x01 to 0x18, 0x20, 0x21, 0x70/0x71 (firmware install/status) and
+        # 0x80.  Lacks 0x22 (event log), 0x81 and 0x83 (LUN info ex/ex2.)
+        'system_ops': frozenset(tuple(range(0x01, 0x19)) +
+                                (0x20, 0x21, 0x70, 0x71, 0x80)),
+    },
+}
+
+
+def _fwkey(version):
+    """ (major, minor) from a firmware version string like '2.1.5', or
+        None if it does not start with two dot separated numbers. """
+    if not isinstance(version, str):
+        return None
+    m = re.match(r'(\d+)\.(\d+)', version.strip())
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)))
+
+
 def _ledstatus(n):
     """ return colors decoded, given numeric slot status 
             goal: match what the lights are doing on the unit.
@@ -673,6 +716,33 @@ class Drobo:
 
         return format_script
 
+    def _fw_implements(self, kind, code):
+        """ False when a request must not be sent: it would go through the
+        ATA tunnel, and the unit's firmware (as read from sub-page 0x08) is
+        in FIRMWARE_IMPLEMENTS without it.  kind: 'sub_pages' (page 0x3A
+        sub-page) or 'system_ops' (0xEA operation.)  True otherwise,
+        including before the firmware version is known.
+        """
+        if getattr(self.fd, 'tunnel', False) is not True:
+            return True
+        fw = getattr(self, 'fw', None)
+        if not fw or len(fw) < 8:
+            return True
+        table = FIRMWARE_IMPLEMENTS.get(_fwkey(fw[7]))
+        if table is None:
+            return True
+        return code in table[kind]
+
+    def __gate(self, kind, code):
+        """ raise FirmwareLacks unless _fw_implements(kind, code). """
+        if self._fw_implements(kind, code):
+            return
+        what = {'sub_pages': 'sub_page', 'system_ops': '0xEA op'}[kind]
+        if DEBUG & DBG_HWDialog:
+            print('firmware %s lacks %s 0x%02x: not sent' %
+                  (self.fw[7], what, code))
+        raise FirmwareLacks("firmware lacks %s 0x%02x" % (what, code))
+
     def __getsubpage(self, sub_page, pack):
         """Retrieve Sub page from drobo block device.
        Uses DroboIOctl class to run the raw ioctl.
@@ -695,6 +765,7 @@ class Drobo:
         if DEBUG & DBG_Simulation:
             return ()
 
+        self.__gate('sub_pages', sub_page)
         mypack = '>BBH' + pack
         paklen = struct.calcsize(mypack)
         if DEBUG & DBG_RawReturn:
@@ -1767,8 +1838,11 @@ class Drobo:
         says are there (newer firmware returns longer records.)
 
         Uses the same legacy-then-DBD logic as __getsubpage.  Raises
-        DroboException if no page with the right header comes back.
+        DroboException if no page with the right header comes back, and
+        FirmwareLacks (one) without sending anything if the firmware lacks
+        the sub-page (see _fw_implements.)
         """
+        self.__gate('sub_pages', sub_page)
         if self.mode_sense_style == 'legacy':
             alloc = maxlen + 4
             modepageblock = struct.pack(">BBBBBBBHB", 0x5a, 0, 0x3a, sub_page,
@@ -1953,10 +2027,11 @@ class Drobo:
         """ issue a vendor unique system operation that returns data:
             ea 10 80 <op> <arg> 00 21 <length16> <last>, as the vendor's
             software does.  Only operations listed in _SYSTEM_READ_OPS are
-            allowed.
+            allowed, and not those the firmware lacks (see _fw_implements.)
         """
         if op not in self._SYSTEM_READ_OPS:
             raise DroboException("system operation 0x%02x not allowed" % op)
+        self.__gate('system_ops', op)
         cdb = struct.pack(">BBBBBBBHB", 0xea, 0x10, 0x80, op, arg & 0xff, 0,
                           0x21, length, last & 0xff)
         return self.fd.get_sub_page(length, cdb, 0, DEBUG)

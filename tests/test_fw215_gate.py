@@ -21,10 +21,12 @@ Drobo Utils comes with ABSOLUTELY NO WARRANTY; For details type see the file
 named COPYING in the root of the source directory tree.
 """
 
+import io
 import os
 import struct
 import sys
 import unittest
+from contextlib import redirect_stdout
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -32,11 +34,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_regression import (FakeDevice, make_drobo, setUpModule,
                              tearDownModule)
 from test_ata_tunnel import (FakeSysfs, SgIoRecorder, FirmwareTunnel,
-                             real_drobo, no_env, open_dev, GEN2, LBA32)
-from test_unsupported_features import Fw215Device, EX2_FEATURE
+                             real_drobo, no_env, open_dev, GEN2)
+from test_cov_ioctl import fake_open
+from test_cov_drobom import DrobomTestCase
+from test_unsupported_features import (Fw215Device, EX2_FEATURE, DRIVES_MSG,
+                                       VOLUMES_MSG, SERIAL_MSG)
 
 import Drobo
 import DroboIOctl
+
+REAL_DROBOIOCTL = DroboIOctl.DroboIOctl  # before DrobomTestCase guards it
 
 # --- a Drobo S Gen 2 running 2.1.5, with the reply bytes seen on hardware ---
 
@@ -61,11 +68,17 @@ GEN2_CONFIG = bytes.fromhex(
     '7a01001805031001000007ffffffff00').ljust(28, b'\0')
 
 
+# free, used, usable protected total, unused: 78% full, as on hardware.
+GEN2_CAPACITY = (2846 * 10**9, 10118 * 10**9, 12964 * 10**9, 0)
+
+
 def gen2_slots_page():
     rec = b''
     for slot in range(GEN2_SLOTS):
-        rec += struct.pack('>HBQQB32s16sL', slot, slot, 4000787030016, 0, 1,
-                           b'ST4000DM004', b'ST4000DM004', 0)
+        model = b'ST4000DM004' if slot < 2 else b'WDC WD30EZRX'
+        size = 4000787030016 if slot < 2 else 3000592982016
+        rec += struct.pack('>HBQQB32s16sL', slot, slot, size, 0, 3, model,
+                           model, 0)
     body = struct.pack('>B', GEN2_SLOTS) + rec
     return struct.pack('>BBH', 0x7a, 0x03, len(body)) + body
 
@@ -103,12 +116,19 @@ class Gen2Unit(FakeDevice):
     def page(self, sub_page):
         pages = {
             0x01: GEN2_CONFIG,
-            0x02: plain_page(0x02, 'QQQQ', 10118, 2846, 12964, 0),
+            0x02: plain_page(0x02, 'QQQQ', *GEN2_CAPACITY),
             0x03: gen2_slots_page(),
             0x05: plain_page(0x05, 'LH32s', 1795380300, 0, b'Drobo'),
             0x06: plain_page(0x06, 'BB', 0, 11),
             0x08: gen2_firmware_page(self.version, self.features),
             0x09: plain_page(0x09, 'LLLL', 0, 0, 0, 0),
+            # options: yellow 85%, red 95%; one 16 TiB LUN, GPT.
+            0x30: plain_page(0x30, 'BBBIBB', 85, 95, 0, 0, 0, 0),
+            0x04: plain_page(0x04, 'B' + 'HBQQ' * 8, 1, 0, 0, 2**44,
+                             10118 * 10**9, *((0, 0, 0, 0) * 7)),
+            0x07: plain_page(0x07, 'B' + 'HBQBBBH3B' * 8, 1,
+                             0, 0, 2**44, 0, 2, 1, 0, 0, 0, 0,
+                             *((0,) * 10 * 7)),
         }
         if sub_page in pages:
             return pages[sub_page]
@@ -194,7 +214,7 @@ class TestTunnelSupportedUnchanged(TunnelCase):
 
     def test_supported_reads(self):
         d = self.unit()
-        self.assertEqual(d.GetSubPageCapacity(), (10118, 2846, 12964, 0))
+        self.assertEqual(d.GetSubPageCapacity(), GEN2_CAPACITY)
         self.assertEqual(len(d.GetSubPageSlotInfo()), GEN2_SLOTS)
         self.assertEqual(d.GetSubPageProtocol(), (0, 11))
         self.assertEqual(d.GetStatusEx()['severity'], 'green')
@@ -228,23 +248,25 @@ class TestTunnelOtherFirmwareUnchanged(TunnelCase):
 
     def each_version(self):
         for version in (b'4.2.3', b'2.0.3', b'3.1.5', b'1.1.2', b'junk', b''):
-            with self.subTest(version=version):
-                yield version, self.unit(version)
+            yield version, self.unit(version)
 
     def test_slotinfo2_sent(self):
         for version, d in self.each_version():
-            self.assertIsNone(d.GetSlotInfo2())
-            self.assertEqual(self.subpages(), [0x35])
+            with self.subTest(version=version):
+                self.assertIsNone(d.GetSlotInfo2())
+                self.assertEqual(self.subpages(), [0x35])
 
     def test_serial_sent(self):
         for version, d in self.each_version():
-            self.assertIsNone(d.GetSerial())
-            self.assertEqual(self.subpages(), [0x80])
+            with self.subTest(version=version):
+                self.assertIsNone(d.GetSerial())
+                self.assertEqual(self.subpages(), [0x80])
 
     def test_luninfo_ex_sent(self):
         for version, d in self.each_version():
-            self.assertIsNone(d.GetLUNsInfoEx())
-            self.assertEqual(self.ops(), [0x81])
+            with self.subTest(version=version):
+                self.assertIsNone(d.GetLUNsInfoEx())
+                self.assertEqual(self.ops(), [0x81])
 
 
 def pass_through_unit(style='legacy', features=0x0001 | 0x0002 | 0x0080):
@@ -297,8 +319,8 @@ class TestPassThroughByteIdentical(unittest.TestCase):
                          [(0x5a, 0x35), (0x5a, 0x80), (0xea, 0x81)])
 
 
-class TestSgIoTimeouts(unittest.TestCase):
-    """ the SG_IO timeout pass-through commands carry (milliseconds.) """
+class TimeoutCase(unittest.TestCase):
+    """ records the SG_IO timeout (milliseconds) of each command. """
 
     def setUp(self):
         no_env(self)
@@ -320,12 +342,281 @@ class TestSgIoTimeouts(unittest.TestCase):
             dio.put_sub_page(bytes.fromhex('55017a05000000002400'), b'\0' * 36, 0)
         return seen
 
+
+class TestSgIoTimeouts(TimeoutCase):
+    """ the SG_IO timeout pass-through commands carry. """
+
     def test_pass_through_default(self):
         self.assertEqual(DroboIOctl.sg_io_hdr().timeout, 20000)
 
     def test_pass_through_commands(self):
         self.assertEqual(self.timeouts('passthrough'),
                          [(b'\x5a', 20000), (b'\x55', 20000)])
+
+
+# --- Part 2: the gate ------------------------------------------------------------
+
+
+class TestGateTable(unittest.TestCase):
+    """ the table of what firmware implements, and its key. """
+
+    def test_fw_2_1(self):
+        t = Drobo.FIRMWARE_IMPLEMENTS[(2, 1)]
+        self.assertEqual(t['sub_pages'], frozenset(FW215_SUBPAGES))
+        self.assertEqual(t['system_ops'], frozenset(FW215_OPS))
+        for sp in FW215_LACKS_SUBPAGES:
+            self.assertNotIn(sp, t['sub_pages'])
+        for op in FW215_LACKS_OPS:
+            self.assertNotIn(op, t['system_ops'])
+
+    def test_only_2_1_known(self):
+        self.assertEqual(list(Drobo.FIRMWARE_IMPLEMENTS), [(2, 1)])
+
+    def test_fixed_requests_are_implemented(self):
+        """ requests drobo-utils sends with fixed codes, outside the gated
+            read paths, all exist in 2.1.5: blink 0x06, standby 0x0d, LUN
+            size 0x0f, diagnostics 0x04/0x07, firmware 0x70/0x71; MODE
+            SELECT of 0x05 (clock/name), 0x30 and 0x31 (options.) """
+        t = Drobo.FIRMWARE_IMPLEMENTS[(2, 1)]
+        for op in (0x06, 0x0d, 0x0f, 0x04, 0x07, 0x70, 0x71):
+            self.assertIn(op, t['system_ops'])
+        for sp in (0x05, 0x30, 0x31):
+            self.assertIn(sp, t['sub_pages'])
+
+    def test_version_key(self):
+        for text, key in (('2.1.5', (2, 1)), ('2.1.0', (2, 1)),
+                          ('2.1', (2, 1)), (' 4.2.3 ', (4, 2)),
+                          ('10.20.30', (10, 20)), ('2', None), ('', None),
+                          ('junk', None), ('v2.1.5', None), (None, None),
+                          (215, None)):
+            with self.subTest(text=text):
+                self.assertEqual(Drobo._fwkey(text), key)
+
+    def test_lacks_is_a_drobo_exception(self):
+        self.assertTrue(issubclass(Drobo.FirmwareLacks, Drobo.DroboException))
+
+
+class TestTunnelGated(TunnelCase):
+    """ 2.1.x through the tunnel: nothing the firmware lacks is sent, and
+        each call returns what it returns today when the unit refuses. """
+
+    VERSIONS = (b'2.1.5', b'2.1.0', b'2.1.9')
+
+    def each_unit(self, features=GEN2_FEATURES):
+        for version in self.VERSIONS:
+            yield version, self.unit(version, features)
+
+    def assertNothingSent(self):
+        self.assertEqual(self.rec.calls, [])
+        self.assertEqual(self.dev.hung, [])
+
+    def test_slotinfo2(self):
+        for version, d in self.each_unit():
+            with self.subTest(version=version):
+                before = d.mode_sense_style
+                self.assertIsNone(d.GetSlotInfo2())
+                self.assertNothingSent()
+                self.assertEqual(d.mode_sense_style, before)
+
+    def test_serial(self):
+        for version, d in self.each_unit():
+            with self.subTest(version=version):
+                self.assertIsNone(d.GetSerial())
+                self.assertNothingSent()
+
+    def test_luninfo_ex(self):
+        for version, d in self.each_unit():
+            with self.subTest(version=version):
+                self.assertIsNone(d.GetLUNsInfoEx())
+                self.assertNothingSent()
+
+    def test_luninfo_best(self):
+        for version, d in self.each_unit():
+            with self.subTest(version=version):
+                self.assertIsNone(d.GetLUNsInfoBest())
+                self.assertNothingSent()
+
+    def test_luninfo_ex2_even_if_advertised(self):
+        for version, d in self.each_unit(GEN2_FEATURES | EX2_FEATURE):
+            with self.subTest(version=version):
+                self.assertIsNone(d.GetLUNsInfoEx2())
+                self.assertIsNone(d.GetLUNsInfoBest())
+                self.assertNothingSent()
+
+    def test_redundancy_level_from_slot_info(self):
+        for version, d in self.each_unit():
+            with self.subTest(version=version):
+                caps = [s[1] for s in d.GetSubPageSlotInfo()]
+                usable = d.GetSubPageCapacity()[2]
+                self.fw.requests.clear()
+                self.assertEqual(d.GetRedundancyLevel(),
+                                 Drobo._redundancylevel(caps, usable))
+                self.assertEqual(self.subpages(), [0x03, 0x02])
+                self.assertEqual(self.dev.hung, [])
+
+    def test_every_lacking_sub_page_refused_before_io(self):
+        d = self.unit()
+        for sp in FW215_LACKS_SUBPAGES + (0x0a, 0x10, 0x32, 0x81, 0xff):
+            with self.subTest(sub_page=sp):
+                with self.assertRaises(Drobo.FirmwareLacks):
+                    d._Drobo__getsubpage_raw(sp, 24)
+                with self.assertRaises(Drobo.FirmwareLacks):
+                    d._Drobo__getsubpage(sp, 'BB')
+        self.assertNothingSent()
+
+    def test_every_lacking_op_refused_before_io(self):
+        d = self.unit()
+        for op in (0x81, 0x83):
+            with self.assertRaises(Drobo.FirmwareLacks):
+                d._Drobo__system_read(op, 0, 1024)
+        with self.assertRaises(Drobo.DroboException):
+            d._Drobo__system_read(0x22, 0, 1024)  # not a read op at all
+        self.assertNothingSent()
+
+    def test_implemented_requests_pass(self):
+        d = self.unit()
+        for sp in FW215_SUBPAGES:
+            self.assertTrue(d._fw_implements('sub_pages', sp), hex(sp))
+        for op in FW215_OPS:
+            self.assertTrue(d._fw_implements('system_ops', op), hex(op))
+        for sp in FW215_LACKS_SUBPAGES:
+            self.assertFalse(d._fw_implements('sub_pages', sp), hex(sp))
+        for op in FW215_LACKS_OPS:
+            self.assertFalse(d._fw_implements('system_ops', op), hex(op))
+
+    def test_trace(self):
+        d = self.unit()
+        out = io.StringIO()
+        with mock.patch.object(Drobo, 'DEBUG', Drobo.DBG_HWDialog), \
+             redirect_stdout(out):
+            self.assertIsNone(d.GetSlotInfo2())
+        self.assertIn('firmware 2.1.5 lacks sub_page 0x35: not sent',
+                      out.getvalue())
+
+
+class TestGateScope(unittest.TestCase):
+    """ where the gate does not apply. """
+
+    def test_pass_through_2_1_5_not_gated(self):
+        dev, d = pass_through_unit()
+        self.assertEqual(d.fw[7], '2.1.5')
+        self.assertTrue(d._fw_implements('sub_pages', 0x35))
+        self.assertTrue(d._fw_implements('system_ops', 0x81))
+
+    def test_mock_fd_not_gated(self):
+        """ only a real tunnel (fd.tunnel is True) turns the gate on. """
+        dev, d = pass_through_unit()
+        d.fd = mock.MagicMock()
+        self.assertTrue(d._fw_implements('sub_pages', 0x35))
+
+    def test_before_firmware_read(self):
+        dev, d = pass_through_unit()
+        d.fd = mock.MagicMock(tunnel=True)
+        del d.fw
+        self.assertTrue(d._fw_implements('sub_pages', 0x35))
+        d.fw = ()
+        self.assertTrue(d._fw_implements('sub_pages', 0x35))
+        d.fw = (5, 41, 62910, 0, 0, '', 'ArmMarvell', '2.1.5', [])
+        self.assertFalse(d._fw_implements('sub_pages', 0x35))
+
+    def test_simulation(self):
+        d = Drobo.Drobo(['/dev/sdz'], Drobo.DBG_Simulation)
+        self.assertIsNone(d.fd)
+        self.assertTrue(d._fw_implements('sub_pages', 0x35))
+
+
+class TestTunnelTimeout(TimeoutCase):
+    """ a tunnel command that hangs fails in TUNNEL_TIMEOUT_MS. """
+
+    def test_value(self):
+        self.assertEqual(DroboIOctl.TUNNEL_TIMEOUT_MS, 10000)
+
+    def test_tunnel_commands(self):
+        t = DroboIOctl.TUNNEL_TIMEOUT_MS
+        self.assertEqual(self.timeouts('tunnel'),
+                         [(b'\x2a', t), (b'\x28', t), (b'\x2a', t)])
+
+    def test_inquiry_on_tunnel_device_keeps_pass_through_timeout(self):
+        seen = []
+
+        def ioctl(fd, req, hdr, mutate=False):
+            seen.append(hdr.timeout)
+            return SgIoRecorder(FirmwareTunnel(FakeDevice()))(fd, req, hdr)
+
+        dio = open_dev('/dev/sdq', 0, 0, transport='tunnel')
+        with mock.patch.object(DroboIOctl, 'ioctl', ioctl):
+            dio.get_sub_page(76, bytes.fromhex('120000004c00'), 0, 0)
+        self.assertEqual(seen, [20000])
+
+
+class TestDrobomOnGen2Tunnel(DrobomTestCase):
+    """ drobom against a simulated 2.1.5 unit through the tunnel: nothing
+        the firmware lacks is sent, and the usual one-line messages. """
+
+    def setUp(self):
+        super().setUp()
+        no_env(self)
+        for p in (mock.patch.object(Drobo, 'vpd_serial', lambda *a, **k: None),
+                  mock.patch.object(DroboIOctl, 'open', fake_open,
+                                    create=True)):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def run_on(self, *args, features=GEN2_FEATURES):
+        self.dev = Gen2Unit(features=features)
+        self.fw = FirmwareTunnel(self.dev)
+        rec = SgIoRecorder(self.fw)
+
+        def ioctl(fd, req, hdr, mutate=False):
+            if req != DroboIOctl.sg_io_hdr.SG_IO:  # sg version, GET_IDLUN
+                return 0
+            return rec(fd, req, hdr, mutate)
+
+        dio = REAL_DROBOIOCTL('/dev/sdq', 0, 0, transport='tunnel')
+        with mock.patch.object(DroboIOctl, 'ioctl', ioctl), self.device(dio):
+            r = self.drobom('-v', '0', *args)
+        self.assertEqual(self.dev.hung, [])
+        self.assertNotIn('Traceback', r.out + r.err)
+        return r
+
+    def subpages(self):
+        return [r[0][3] for r in self.fw.requests if r[0][0] == 0x5a]
+
+    def test_info_health(self):
+        r = self.run_on('info', 'health')
+        self.assertNotIn(0x35, self.subpages())
+        self.assertIn(0x03, self.subpages())
+        self.assertIn('Redundancy: protected\n', r.out)
+        self.assertIn('Redundancy level: single', r.out)
+        self.assertIn('Status: OK\n', r.out)
+
+    def test_info_drives(self):
+        self.assertEqual(self.run_on('info', 'drives').out, DRIVES_MSG)
+
+    def test_info_volumes(self):
+        for features in (GEN2_FEATURES, GEN2_FEATURES | EX2_FEATURE):
+            with self.subTest(features=features):
+                self.assertEqual(
+                    self.run_on('info', 'volumes', features=features).out,
+                    VOLUMES_MSG)
+
+    def test_info_serial(self):
+        self.assertEqual(self.run_on('info', 'serial').out, SERIAL_MSG)
+
+    def test_default_info_list(self):
+        r = self.run_on('info')
+        self.assertIn(DRIVES_MSG, r.out)
+        self.assertIn(VOLUMES_MSG, r.out)
+        self.assertIn("'ArmMarvell', '2.1.5'", r.out)
+        self.assertIn('green', r.out)
+        self.assertIn("'YellowThreshold': 85", r.out)
+        self.assertIn('Redundancy level: single', r.out)
+        asked = self.subpages()
+        for sp in asked:
+            self.assertIn(sp, FW215_SUBPAGES)
+        for r in self.fw.requests:
+            if r[0][0] == 0xea:
+                self.assertIn(r[0][3], FW215_OPS)
 
 
 if __name__ == '__main__':

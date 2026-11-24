@@ -367,7 +367,9 @@ USB 3 era units:
    (IOError), but the code also treats a GOOD reply with no page, an
    empty or short page, another sub-page's page, or an empty 0xEA reply
    as 'not supported', with at most two CDBs per read and no retries
-   (tests/test_unsupported_features.py.)  Untested on hardware.
+   (tests/test_unsupported_features.py.)  That is for pass-through;
+   through the ATA tunnel these requests are not sent at all (see
+   "Firmware capability gate" below.)
    Sub-page 0x07 (LUN info 2) is present in 2.1.5.
 
 Protocol Notes: the ATA tunnel
@@ -452,9 +454,57 @@ DROBO_UTILS_TRANSPORT=passthrough (anything else: automatic).  drobom -v 16
 prints the transport picked for each device.
 
 STATUS: built from analysis of the protocol, tested against a simulated
-unit (tests/test_ata_tunnel.py); not yet validated on hardware.  It relies
-on the bridge turning SCSI WRITE(10)/READ(10) at LBA 32 into ATA commands at
-LBA 32, which is what SCSI to ATA translation normally does.
+unit (tests/test_ata_tunnel.py).  Validated read-only on one Drobo S Gen 2
+(firmware 2.1.5) on 2026-11-24: every supported request got a proper reply,
+and the partition table at LBAs 0-33 stayed byte for byte the same.  It
+relies on the bridge turning SCSI WRITE(10)/READ(10) at LBA 32 into ATA
+commands at LBA 32, which is what SCSI to ATA translation normally does.
+
+Firmware capability gate.  On that unit, a request the firmware does not
+implement was not refused: sub-page 0x35 (from 'drobom info health') left
+the tunnel write uncompleted, SG_IO timed out, and the kernel reset the USB
+link of a mounted disk.  Pass-through units refuse such requests quickly
+(see "What firmware 2.1.5 lacks" above), but through the tunnel the only
+safe policy is not to send them.  So:
+
+ * Drobo.FIRMWARE_IMPLEMENTS lists, per firmware (major, minor), the page
+   0x3A sub-pages and 0xEA operations its image implements, from static
+   analysis of its dispatch tables.  Only 2.1 is listed:
+
+   - sub-pages 0x01-0x09, 0x11, 0x15, 0x30, 0x31, 0x82.  Not sent: 0x33
+     (system info), 0x35 (slot info 2), 0x36-0x3A, 0x80 (serial), and
+     anything else.  0xE1/0xE2 are left out on purpose: those handlers
+     act on drives, they are not reads.
+   - 0xEA operations 0x01-0x18, 0x20, 0x21, 0x70, 0x71, 0x80.  Not sent:
+     0x22 (event log), 0x81 and 0x83 (extended LUN info).
+
+ * The version comes from sub-page 0x08 (Drobo.fw[7], e.g. '2.1.5'), read
+   while the unit is opened.  Before that only sub-pages 0x01, 0x05 and
+   0x08 (and INQUIRY) are sent, all present everywhere.
+ * The gate sits in the three read paths (__getsubpage, __getsubpage_raw
+   and __system_read): a request outside the list raises FirmwareLacks (a
+   DroboException) before any I/O, which every caller already treats as
+   'the unit refused'.  So GetSlotInfo2, GetSerial, GetLUNsInfoEx/Ex2/Best
+   return None, GetRedundancyLevel uses sub-page 0x03, and drobom prints
+   its usual 'not supported by this firmware' lines, without anything
+   reaching the unit.  GetLUNsInfoEx2 is also gated by the
+   SUPPORTS_LUNINFO_EX2 feature bit, which 2.1.5 does not set.
+ * Requests sent with fixed codes elsewhere (blink 0x06, standby 0x0d, LUN
+   size 0x0f, diagnostics 0x04/0x07, firmware 0x70/0x71, MODE SELECT of
+   0x05, 0x30 and 0x31) all exist in 2.1; a test keeps it that way.
+ * Only on the tunnel, and only for listed firmware.  Pass-through is not
+   gated: those units fail fast, the table comes from static analysis, and
+   other models keep sending exactly what they sent before.  A tunnel unit
+   with any other version (or none readable) is not gated either.
+ * Tunnel commands carry an SG_IO timeout of 10 s
+   (DroboIOctl.TUNNEL_TIMEOUT_MS) instead of pass-through's 20 s.  Replies
+   come from the firmware's memory in milliseconds, and once SG_IO gives up
+   the kernel resets the link anyway, so waiting longer gains nothing.  It
+   is not shorter because the tunnel write may queue behind ordinary disk
+   I/O that is waiting for drives to spin up.
+
+Tests: tests/test_fw215_gate.py (a simulated Gen 2 on 2.1.5, built from
+reply bytes seen on the hardware.)
 
 Protocol Notes: facts from ReDrobo
 ----------------------------------
