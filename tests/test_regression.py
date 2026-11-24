@@ -33,6 +33,12 @@ sys.path.insert(0, TOP)
 import Drobo
 import DroboIOctl
 
+# DroboIOctl picks its transport from the device's sysfs vendor/model.  Tests
+# use made up /dev names that may exist on the host (even be a real Drobo), so
+# no test reads the real sysfs: tests that need one build their own tree.
+DroboIOctl.SYSFS_ROOT = os.path.join(TOP, 'tests', 'no-such-sysfs')
+os.environ.pop('DROBO_UTILS_TRANSPORT', None)  # nor a forced transport.
+
 _STATE = None
 
 

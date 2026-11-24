@@ -252,10 +252,12 @@ USB 3 era units:
      so this may be the busy state rather than the protocol.  To be confirmed on 
      a healthy unit.
 
- * Transport: over USB (and FireWire, Thunderbolt) the vendor's software uses 
-   ordinary SCSI pass-through, like drobo-utils.  Only for eSATA (device path 
-   containing 'esata') does it tunnel requests through reads and writes of the 
-   disk itself.
+ * Transport: the USB 3 port of this unit is a USB 3 to SATA bridge in front
+   of the Drobo's eSATA target.  The bridge answers MODE SENSE itself (just a
+   mode parameter header), so page 0x3A queries sent pass-through never reach
+   the Drobo.  The vendor's software reaches this unit (and 3rd generation
+   units) through the ATA tunnel, as it does over eSATA; so does drobo-utils
+   now.  See "Protocol Notes: the ATA tunnel" below.
 
  * Do NOT send, even though it looks like a read: MODE SENSE page 0x3A, 
    sub-page 0xE1 or 0xE2, with a slot number in byte 4.  The vendor's software 
@@ -367,6 +369,92 @@ USB 3 era units:
    as 'not supported', with at most two CDBs per read and no retries
    (tests/test_unsupported_features.py.)  Untested on hardware.
    Sub-page 0x07 (LUN info 2) is present in 2.1.5.
+
+Protocol Notes: the ATA tunnel
+------------------------------
+
+Some units cannot be reached with SCSI pass-through, because something in
+between (a SATA link, or a USB to SATA bridge) only carries ordinary disk
+reads and writes.  Their firmware offers a side channel instead: a request
+written to LBA 32 of the whole disk is taken as a management command, and
+reading LBA 32 back returns its reply.  The firmware checks the starting
+LBA of each read or write; only one that starts exactly at LBA 32 is
+diverted, and diverted writes never reach the disk (a request with a bad
+header is dropped, not written.)  DroboIOctl implements it as the 'tunnel'
+transport.
+
+Request (written with WRITE(10), LBA 32, as many 512 byte sectors as the
+block needs, zero padded).  All fields are big endian 32 bit:
+
+ ======  ===========================================================
+ offset  contents
+ ======  ===========================================================
+ 0       magic 0xFACECAFE
+ 4       version, 1
+ 8       direction: 1 = data from the unit, 0 = data to the unit
+ 12      transfer length in bytes
+ 16      CDB length n
+ 20      the CDB itself (n bytes), exactly as pass-through would send it
+ 20+n    for direction 0 only: the data to send (transfer length bytes)
+ ======  ===========================================================
+
+Reply (direction 1 only: read with READ(10), LBA 32, enough sectors for
+12 + transfer length bytes):
+
+ ======  ===========================================================
+ offset  contents
+ ======  ===========================================================
+ 0       magic 0xBEEFFEED; anything else is an error
+ 4       version, 1 (not a status; drobo-utils does not check it)
+ 8       length of the data returned
+ 12      the data
+ ======  ===========================================================
+
+The data used is the smallest of: what was read after the header, the
+length at offset 8, and the transfer length asked for.  A command the unit
+rejects fails the read (or write) itself, which surfaces as IOError.
+Direction 0 commands (MODE SELECT, 0xEA operations that send data, such as
+blink and standby with their one zero byte) are a single write: no reply is
+read.  The firmware handles at most 64 KiB (128 sectors) per request or
+reply; DroboIOctl refuses larger ones before doing any I/O.
+
+How drobo-utils uses it:
+
+ * Both the write and the read are SG_IO commands with explicit WRITE(10)
+   (2a 00 00 00 00 20 00 <sectors16> 00) and READ(10) (28 ... same) CDBs,
+   no FUA or other flags, so nothing goes through the page cache: a cached
+   LBA 32 would hand back a stale reply.  One request at a time per device
+   (a lock shared by every DroboIOctl on that device in the process; two
+   separate programs talking to one unit at once are not guarded against.)
+ * get_sub_page() and put_sub_page() wrap every command, except INQUIRY,
+   which goes pass-through: the bridge's identity is what chose the
+   tunnel, and model detection keeps seeing the same strings.
+ * Example: the config query 5a 08 3a 01 00 00 00 00 0f 00 with a 15 byte
+   transfer is the 30 byte request
+   fa ce ca fe 00 00 00 01 00 00 00 01 00 00 00 0f 00 00 00 0a 5a 08 3a 01
+   00 00 00 00 0f 00, padded to one sector; the reply is one sector too.
+ * Tunnel only on the whole disk: LBA 32 of a partition is somewhere else
+   on the disk, so DroboIOctl refuses the tunnel for a partition node.
+
+Which devices use it.  The vendor's software decides from the device's
+Windows path (lower case, spaces as underscores), which embeds the INQUIRY
+vendor and product.  drobo-utils applies the same test to the vendor and
+model the kernel shows in sysfs (/sys/class/block/sdX/device/ or
+/sys/class/scsi_generic/sgN/device/; reading them sends nothing to the
+device): lower case, trimmed, spaces turned into underscores, joined as
+vendor&model.  The tunnel is used when that string contains '3rd_gen_dr',
+or 'rdr3', or both 'drobo_s' and 'usb_3.0' (the Drobo S Gen 2:
+'usb_3.0&drobo_s_-_gen_2').  Everything else uses pass-through, exactly as
+before (DroboIOctl.wants_tunnel, TUNNEL_IDENTITIES.)
+
+To force a transport for diagnosis, set DROBO_UTILS_TRANSPORT=tunnel or
+DROBO_UTILS_TRANSPORT=passthrough (anything else: automatic).  drobom -v 16
+prints the transport picked for each device.
+
+STATUS: built from analysis of the protocol, tested against a simulated
+unit (tests/test_ata_tunnel.py); not yet validated on hardware.  It relies
+on the bridge turning SCSI WRITE(10)/READ(10) at LBA 32 into ATA commands at
+LBA 32, which is what SCSI to ATA translation normally does.
 
 Protocol Notes: facts from ReDrobo
 ----------------------------------

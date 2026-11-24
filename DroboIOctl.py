@@ -8,7 +8,10 @@ named COPYING in the root of the source directory tree.
 from ctypes import *
 from fcntl import ioctl
 import Drobo
+import io
+import os
 import struct
+import threading
 
 
 def hexdump(label, data):
@@ -23,6 +26,122 @@ def hexdump(label, data):
             print()
             print("%s %03x:" % (label, i), end=' ')
     print()
+
+
+# --- ATA tunnel ---------------------------------------------------------------
+#
+# Some Drobos are reached through a bridge that does not pass vendor commands
+# on (the Drobo S Gen 2 on USB 3: a USB 3 to SATA bridge answers MODE SENSE
+# itself, with an empty header).  Their firmware accepts the same commands
+# wrapped in a request block written to LBA 32 of the whole disk, and returns
+# the reply when LBA 32 is read back.  A read or write that starts exactly at
+# LBA 32 never reaches the disk.  See "ATA tunnel" in DEVELOPERS.rst.
+
+SYSFS_ROOT = '/sys'
+TRANSPORT_ENV = 'DROBO_UTILS_TRANSPORT'  # tunnel, passthrough, else auto.
+
+TUNNEL_LBA = 32
+TUNNEL_SECTOR = 512
+TUNNEL_MAX = 0x10000  # largest request or reply the firmware handles.
+TUNNEL_REQUEST_MAGIC = 0xFACECAFE
+TUNNEL_REPLY_MAGIC = 0xBEEFFEED
+TUNNEL_VERSION = 1
+TUNNEL_HEADER = '>LLLLL'  # magic, version, direction, length, CDB length
+TUNNEL_REPLY_HEADER = '>LLL'  # magic, version, data length
+TUNNEL_DATA_IN = 1
+TUNNEL_DATA_OUT = 0
+
+# identities (see _identity_key) that use the tunnel: a rule matches when
+# every one of its substrings is present.
+TUNNEL_IDENTITIES = [
+    ('3rd_gen_dr', ),
+    ('rdr3', ),
+    ('drobo_s', 'usb_3.0'),
+]
+
+_tunnel_locks = {}
+_tunnel_locks_guard = threading.Lock()
+
+
+def _identity_key(vendor, model):
+    """ vendor and model as one lower case string, spaces as underscores. """
+    return '&'.join(
+        _inquiry_text(f).strip().replace(' ', '_') for f in (vendor, model))
+
+
+def wants_tunnel(vendor, model):
+    """ True if a device with these INQUIRY vendor/model ids (as sysfs shows
+        them) must be reached through the ATA tunnel. """
+    key = _identity_key(vendor, model)
+    return any(all(s in key for s in rule) for rule in TUNNEL_IDENTITIES)
+
+
+def _sysfs_device_name(char_dev_file):
+    return os.path.basename(os.path.realpath(char_dev_file))
+
+
+def sysfs_identity(char_dev_file):
+    """ (vendor, model) of a /dev/sdX or /dev/sgN node from sysfs, or None.
+        Reading sysfs sends nothing to the device. """
+    name = _sysfs_device_name(char_dev_file)
+    for cls in ('block', 'scsi_generic'):
+        d = os.path.join(SYSFS_ROOT, 'class', cls, name, 'device')
+        try:
+            with io.open(os.path.join(d, 'vendor')) as f:
+                vendor = f.read()
+            with io.open(os.path.join(d, 'model')) as f:
+                model = f.read()
+        except OSError:
+            continue
+        return (vendor.rstrip('\n'), model.rstrip('\n'))
+    return None
+
+
+def _is_partition(char_dev_file):
+    name = _sysfs_device_name(char_dev_file)
+    return os.path.exists(
+        os.path.join(SYSFS_ROOT, 'class', 'block', name, 'partition'))
+
+
+def _sectors(nbytes):
+    return (nbytes + TUNNEL_SECTOR - 1) // TUNNEL_SECTOR
+
+
+def _rw10(opcode, sectors):
+    """ READ(10) (0x28) or WRITE(10) (0x2a) of 'sectors' at TUNNEL_LBA,
+        no flags (no FUA: the bridge would turn it into a different ATA
+        command.) """
+    return struct.pack('>BBLBHB', opcode, 0, TUNNEL_LBA, 0, sectors, 0)
+
+
+def tunnel_request(cdb, xferlen, dataout=None):
+    """ the request block for one command, padded to whole sectors.
+        dataout None means a data-in command of xferlen bytes; otherwise
+        dataout (xferlen bytes) follows the CDB. """
+    if dataout is None:
+        direction = TUNNEL_DATA_IN
+        dataout = b''
+    else:
+        direction = TUNNEL_DATA_OUT
+    cdb = bytes(cdb)
+    req = struct.pack(TUNNEL_HEADER, TUNNEL_REQUEST_MAGIC, TUNNEL_VERSION,
+                      direction, xferlen, len(cdb)) + cdb + bytes(dataout)
+    return req.ljust(_sectors(len(req)) * TUNNEL_SECTOR, b'\0')
+
+
+def tunnel_reply(raw, xferlen, debug=0):
+    """ the data in a tunnel reply read from LBA 32: at most xferlen bytes,
+        no more than the reply says it holds or than were read.
+        Raises IOError if the reply is short or has the wrong magic. """
+    hlen = struct.calcsize(TUNNEL_REPLY_HEADER)
+    if len(raw) < hlen:
+        raise IOError("ATA tunnel: short reply (%d bytes)" % len(raw))
+    magic, version, length = struct.unpack(TUNNEL_REPLY_HEADER, raw[:hlen])
+    if magic != TUNNEL_REPLY_MAGIC:
+        raise IOError("ATA tunnel: bad reply magic 0x%08x" % magic)
+    if (version != TUNNEL_VERSION) and (debug & Drobo.DBG_HWDialog):
+        print("ATA tunnel: reply version %d" % version)
+    return bytes(raw[hlen:hlen + min(len(raw) - hlen, length, xferlen)])
 
 
 class sg_io_hdr(Structure):
@@ -92,10 +211,40 @@ class sg_io_hdr(Structure):
 
 
 class DroboIOctl:
-    def __init__(self, char_dev_file, readwrite=1, debugflags=1):
+    def __init__(self, char_dev_file, readwrite=1, debugflags=1,
+                 transport=None):
+        """ transport: 'tunnel' or 'passthrough'.  Otherwise the
+            DROBO_UTILS_TRANSPORT environment variable decides, the same
+            way, and failing that the sysfs vendor/model (wants_tunnel.)
+        """
         self.char_dev_file = char_dev_file
         self.sg_fd = open(char_dev_file, 'w')
         self.debug = debugflags
+
+        if transport not in ('tunnel', 'passthrough'):
+            transport = os.environ.get(TRANSPORT_ENV, '')
+        if transport == 'tunnel':
+            self.tunnel = True
+        elif transport == 'passthrough':
+            self.tunnel = False
+        else:
+            ident = sysfs_identity(char_dev_file)
+            self.tunnel = bool(ident) and wants_tunnel(*ident)
+
+        if self.tunnel and _is_partition(char_dev_file):
+            self.closefd()
+            raise IOError("ATA tunnel needs the whole disk, not %s" %
+                          char_dev_file)
+
+        if self.debug & Drobo.DBG_Detection:
+            print("%s: transport is %s" %
+                  (char_dev_file, 'ATA tunnel' if self.tunnel else
+                   'SCSI pass-through'))
+
+        # one tunnel request at a time per device (in this process.)
+        key = os.path.realpath(char_dev_file)
+        with _tunnel_locks_guard:
+            self.tunnel_lock = _tunnel_locks.setdefault(key, threading.Lock())
 
     def version(self):
         """
@@ -170,7 +319,15 @@ class DroboIOctl:
             out  : choose direction of xfer.  out= to device.
             debug : if 1,then print debugging output (lots of it.)
 
+     On a tunnel device the command goes through the ATA tunnel, except
+     INQUIRY, which the bridge answers (its identity chose the tunnel.)
     """
+        if self.tunnel and mcb[0] != 0x12:
+            if out:  # the same zeroed buffer pass-through sends.
+                self.tunnel_command(mcb, sz, bytes(sz))
+                return bytes(sz)
+            return self.tunnel_command(mcb, sz)
+
         io_hdr = sg_io_hdr()
 
         if out:
@@ -219,6 +376,85 @@ class DroboIOctl:
             print("the length is: ", retsz)
         return page_buffer[0:retsz]
 
+    def _sg_io(self, cdb, direction, data):
+        """ one SG_IO command: data is the bytes to send (SG_DXFER_TO_DEV),
+            or the number of bytes to read.  Returns the bytes read.
+            Raises IOError unless the command completed with GOOD status.
+        """
+        io_hdr = sg_io_hdr()
+        io_hdr.dxfer_direction = direction
+        io_hdr.cmd_len = len(cdb)
+        io_hdr.cmdp = cdb
+
+        sense_buffer = create_string_buffer(64)
+        io_hdr.mx_sb_len = len(sense_buffer)
+        io_hdr.sbp = cast(sense_buffer, c_char_p)
+
+        if direction == sg_io_hdr.SG_DXFER_TO_DEV:
+            size = len(data)
+            buf = create_string_buffer(data, size)
+        else:
+            size = data
+            buf = create_string_buffer(size)
+        io_hdr.dxfer_len = size
+        io_hdr.dxferp = cast(buf, c_char_p)
+
+        if self.debug & Drobo.DBG_HWDialog:
+            hexdump("tunnel cdb", cdb)
+
+        i = ioctl(self.sg_fd, sg_io_hdr.SG_IO, io_hdr, True)
+
+        if self.debug & Drobo.DBG_HWDialog:
+            print("tunnel SG_IO result=%d status: %d driver_status: %d host_status: %d resid: %d" % \
+               ( i, io_hdr.status, io_hdr.driver_status, \
+                  io_hdr.host_status, io_hdr.resid ))
+
+        if i < 0:
+            raise IOError("ATA tunnel SG_IO ioctl error")
+        if (io_hdr.status != io_hdr.SAM_STAT_GOOD) or io_hdr.host_status \
+           or io_hdr.driver_status:
+            raise IOError("ATA tunnel: status %x host %x driver %x" %
+                          (io_hdr.status, io_hdr.host_status,
+                           io_hdr.driver_status))
+        if io_hdr.resid > 0:
+            size = size - io_hdr.resid
+        return buf.raw[:size]
+
+    def tunnel_command(self, cdb, xferlen, dataout=None):
+        """
+     run one command through the ATA tunnel: write the request block to
+     LBA 32, then (data-in only) read the reply from LBA 32.
+
+            cdb     : the command, exactly as it would be sent pass-through.
+            xferlen : bytes of data the command moves.
+            dataout : None for data-in, else the xferlen bytes to send.
+
+     returns the data read (data-in), or None.  Raises IOError on failure,
+     before any I/O when the request or reply would be too large.
+     STATUS: protocol from analysis, not yet validated on hardware.
+    """
+        req = tunnel_request(cdb, xferlen, dataout)
+        reply_len = _sectors(xferlen + struct.calcsize(TUNNEL_REPLY_HEADER)) \
+            * TUNNEL_SECTOR
+        if len(req) > TUNNEL_MAX or (dataout is None and
+                                     reply_len > TUNNEL_MAX):
+            raise IOError("ATA tunnel: command too large (%d bytes)" % xferlen)
+
+        if self.debug & Drobo.DBG_HWDialog:
+            hexdump("tunnel request", req[:max(20 + len(cdb), 32)])
+
+        with self.tunnel_lock:
+            self._sg_io(_rw10(0x2a, len(req) // TUNNEL_SECTOR),
+                        sg_io_hdr.SG_DXFER_TO_DEV, req)
+            if dataout is not None:
+                return None
+            raw = self._sg_io(_rw10(0x28, reply_len // TUNNEL_SECTOR),
+                              sg_io_hdr.SG_DXFER_FROM_DEV, reply_len)
+
+        if self.debug & Drobo.DBG_HWDialog:
+            hexdump("tunnel reply", raw[:32])
+        return tunnel_reply(raw, xferlen, self.debug)
+
     def put_sub_page(self, mcb, buffer, DEBUG):
         """
 
@@ -230,6 +466,13 @@ class DroboIOctl:
 
      return the number of bytes written.
     """
+        if self.tunnel:
+            try:
+                self.tunnel_command(mcb, len(buffer), bytes(buffer))
+            except IOError as e:
+                print(" put_sub_page ATA tunnel error: %s" % e)
+                return None
+            return len(buffer)
 
         io_hdr = sg_io_hdr()
 
