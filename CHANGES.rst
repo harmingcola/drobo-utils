@@ -23,6 +23,14 @@ These are all Open Tasks... HELP WANTED!
 unreleased
 ----------
 
+  * firmware capability gate: through the ATA tunnel, a request the unit's
+    firmware does not implement is never sent (on 2.1.x: sub-pages 0x33,
+    0x35-0x3A and 0x80, 0xEA operations 0x22, 0x81 and 0x83.)  On a Drobo
+    S Gen 2 running 2.1.5 such a request made SG_IO time out and the
+    kernel reset the USB link.  The calls return what they return when a
+    unit refuses (None, or the sub-page 0x03 fallback for the redundancy
+    level.)  Tunnel commands now time out after 10 s, not 20 s.
+    Pass-through is unchanged.
   * ATA tunnel transport (DroboIOctl): the Drobo S Gen 2 on USB 3 (and 3rd
     generation identities) is reached by writing requests to, and reading
     replies from, LBA 32 with SG_IO WRITE(10)/READ(10), because its USB 3
