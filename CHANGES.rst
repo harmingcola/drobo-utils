@@ -23,6 +23,13 @@ These are all Open Tasks... HELP WANTED!
 unreleased
 ----------
 
+  * ATA tunnel transport (DroboIOctl): the Drobo S Gen 2 on USB 3 (and 3rd
+    generation identities) is reached by writing requests to, and reading
+    replies from, LBA 32 with SG_IO WRITE(10)/READ(10), because its USB 3
+    bridge answers MODE SENSE itself.  Chosen from the sysfs vendor/model;
+    every other unit keeps SCSI pass-through, byte for byte.
+    DROBO_UTILS_TRANSPORT=tunnel|passthrough forces one.  Not yet validated
+    on hardware.
   * Drobo S Gen 2 (USB 3): found by INQUIRY product id (vendor is 'USB 3.0'.)
   * discovery: table of known INQUIRY identities (DroboIOctl.DROBO_IDENTITIES)
     covering Gen3, 5D, 5D3, 5C, 8D, Mini, Pro, Elite, B800i/B810i/B1200i;
